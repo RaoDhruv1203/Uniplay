@@ -1,0 +1,64 @@
+{
+  "name": "uniplay",
+  "version": "1.2.0",
+  "description": "A focused desktop download workspace.",
+  "main": "main.cjs",
+  "author": "Ungyani",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.8.1",
+    "hls.js": "^1.7.3",
+    "lucide-static": "^1.47.0",
+    "playwright-core": "^1.63.0"
+  },
+  "build": {
+    "appId": "com.downyt.desktop",
+    "productName": "UNiPLAY",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "drift.cjs",
+      "preload.cjs",
+      "pip-preload.cjs",
+      "ui/**/*",
+      "assets/uniplay.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "tools",
+        "to": "tools",
+        "filter": [
+          "*.exe",
+          "*.txt"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/uniplay.ico",
+      "artifactName": "UNiPLAY.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "UNiPLAY",
+      "installerIcon": "assets/uniplay.ico",
+      "uninstallerIcon": "assets/uniplay.ico",
+      "installerHeader": "assets/installer-header.bmp",
+      "installerSidebar": "assets/installer-sidebar.bmp",
+      "uninstallerSidebar": "assets/installer-sidebar.bmp",
+      "uninstallDisplayName": "UNiPLAY"
+    }
+  }
+}

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>UNiPLAY</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="enhancements.css"></head>
+<body>
+<div class="app">
+  <aside class="rail" aria-label="Navigation">
+    <img class="appmark" src="uniplay.svg" alt="UNiPLAY">
+    <button class="nav active" data-view="download" title="Download"><img src="icons/download.svg" alt=""><span>Download</span></button>
+    <button class="nav" data-view="queue" title="Queue"><img src="icons/list.svg" alt=""><span>Queue</span></button>
+    <button class="nav" data-view="clip" title="Clip Studio"><img src="icons/scissors.svg" alt=""><span>Clip</span></button>
+    <button class="nav" data-view="youtube" title="YouTube player"><img src="icons/monitor-play.svg" alt=""><span>YouTube</span></button>
+    <button class="nav" data-view="live" title="Live streams"><img src="icons/radio.svg" alt=""><span>Live</span></button>
+    <button class="nav" data-view="library" title="Library"><img src="icons/library.svg" alt=""><span>Library</span></button>
+    <button class="nav bottom" data-view="settings" title="Settings"><img src="icons/settings.svg" alt=""><span>Settings</span></button>
+  </aside>
+  <main class="main">
+    <header class="top"><span class="wordmark"><span>UNi</span>PLAY</span><div class="top-right"><button class="notification-button" id="updates-button" title="App updates" aria-label="App updates"><img src="icons/bell.svg" alt=""><i id="update-badge" hidden></i></button><span class="engine" id="engine"><img src="icons/check.svg" alt=""><span id="engine-status">Starting…</span></span></div></header>
+    <section class="view active" id="download">
+      <div class="heading"><h1>Download</h1><span>Videos, audio, or both.</span></div>
+      <div class="card">
+        <div class="urlrow"><img src="icons/link.svg" alt=""><input id="url" spellcheck="false" placeholder="Paste a YouTube link"><button class="primary" id="analyze">Analyze</button></div>
+        <div class="feedback" id="download-feedback" role="status"></div>
+        <div class="result" id="result" hidden>
+          <img id="thumb" class="thumb" alt="Video thumbnail">
+          <div class="video-info"><h2 id="video-title"></h2><p id="video-meta"></p></div>
+          <div class="divider"></div>
+          <div class="setting-line"><span class="setting-label">Save as</span><div class="choice" id="mode-choice"><button data-mode="video">Video</button><button data-mode="audio">Audio</button><button data-mode="both" class="selected">Both</button></div></div>
+          <div class="setting-line"><span class="setting-label">Video quality</span><select id="quality"></select></div>
+          <div class="setting-line"><span class="setting-label">Extra</span><label class="check"><input id="thumbnail-toggle" type="checkbox"> Save thumbnail</label></div>
+          <div class="actions"><button class="subtle" id="thumbnail-only"><img src="icons/image.svg" alt="">Thumbnail only</button><button class="primary" id="start-download"><img src="icons/download.svg" alt="">Download</button></div>
+        </div>
+      </div>
+    </section>
+    <section class="view" id="queue">
+      <div class="heading"><h1>Queue</h1><button class="subtle small" id="clear-completed">Clear completed</button></div>
+      <div class="list" id="queue-list"></div>
+    </section>
+    <section class="view" id="clip">
+      <div class="heading"><h1>Clip Studio</h1><span>Save a selected section.</span></div>
+      <div class="card">
+        <div class="urlrow"><img src="icons/link.svg" alt=""><input id="clip-url" spellcheck="false" placeholder="Paste a YouTube video link"><button class="primary" id="clip-preview">Preview</button></div>
+        <div class="feedback" id="clip-feedback" role="status"></div>
+        <div id="clip-editor" hidden>
+          <div class="clip-grid"><div class="player-box"><iframe id="clip-player" title="YouTube video preview" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="clip-panel"><h2 id="clip-title"></h2><p id="clip-duration"></p><label>Start <input id="start-time" class="time-input" type="text" inputmode="numeric" aria-label="Clip start time" placeholder="0:00"><input id="clip-start" type="range" min="0" step="1"></label><label>End <input id="end-time" class="time-input" type="text" inputmode="numeric" aria-label="Clip end time" placeholder="0:00"><input id="clip-end" type="range" min="0" step="1"></label><button class="subtle full" id="play-range"><img src="icons/play.svg" alt="">Play selection</button><div class="clip-download-options"><span>Download as</span><div class="choice" id="clip-mode-choice"><button data-clip-mode="video" class="selected">Video</button><button data-clip-mode="audio">Audio</button></div><select id="clip-quality" aria-label="Clip quality"></select></div><button class="primary full" id="download-clip"><img src="icons/download.svg" alt="">Download clip</button><button class="folder-hint" id="clip-folder" title="Open the clip save folder"></button></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="view" id="youtube">
+      <div class="heading"><h1>YouTube player</h1><span>Find and play while you work.</span></div>
+      <div class="card">
+        <div class="urlrow"><img src="icons/search.svg" alt=""><input id="youtube-query" spellcheck="false" placeholder="Search videos or paste a YouTube link"><button class="primary" id="youtube-search">Search</button></div>
+        <div class="feedback" id="youtube-feedback" role="status"></div>
+        <div class="floating-callout"><img src="icons/picture-in-picture-2.svg" alt=""><span>Play over your other windows</span><button class="subtle small" id="youtube-float">Open floating player</button></div>
+        <div class="youtube-results" id="youtube-results"><div class="empty">Search for a video to open the floating player.</div></div>
+      </div>
+    </section>
+    <section class="view" id="live">
+      <div class="heading"><h1>Live streams</h1><span>M3U8 channels and M3U playlists.</span></div>
+      <div class="card"><div class="stream-add"><input id="stream-name" placeholder="Channel name"><input id="stream-url" placeholder="https://…/stream.m3u8"><button class="primary" id="add-stream">Add</button></div><div class="playlist-drop" id="playlist-drop" tabindex="0" role="button" aria-label="Import an M3U playlist"><img src="icons/radio.svg" alt=""><span><strong>Drop an M3U playlist here</strong><small>or click to choose a file</small></span><button class="subtle small" id="browse-playlist">Choose file</button></div><input id="playlist-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl" hidden><div class="feedback" id="live-feedback"></div><div id="streams"></div></div>
+    </section>
+    <section class="view" id="library">
+      <div class="heading"><h1>Library</h1><input id="library-search" class="search" placeholder="Search files"></div>
+      <div class="filters" id="library-filters"><button class="selected" data-filter="all">All</button><button data-filter="video">Video</button><button data-filter="audio">Audio</button><button data-filter="clip">Clips</button><button data-filter="thumbnail">Thumbnails</button></div>
+      <div class="library-toolbar"><label><input id="library-select-all" type="checkbox"> Select all</label><span id="library-count">0 selected</span><select id="library-playlist-target" aria-label="Playlist to add selected files to"></select><button class="subtle small" id="library-add-playlist">Add to playlist</button><button class="danger small" id="library-delete" disabled>Move to Recycle Bin</button></div>
+      <div class="list" id="library-list"></div>
+      <div class="playlist-card"><div class="playlist-header"><h2>Playlists</h2><div><input id="new-playlist" placeholder="New playlist name"><button class="subtle small" id="create-playlist">Create</button></div></div><div class="playlist-tabs" id="playlist-tabs"></div><div id="playlist-items"></div></div>
+    </section>
+    <section class="view" id="settings">
+      <div class="heading"><h1>Settings</h1></div>
+      <div class="card settings-card">
+        <div class="setting-row"><div><strong>Save location</strong><small id="save-location"></small></div><button class="subtle small" id="choose-folder">Change</button></div>
+        <div class="setting-row"><div><strong>Downloads at once</strong><small>Keep the connection responsive.</small></div><select id="concurrent"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+        <div class="setting-row"><div><strong>Default thumbnail</strong><small>Save the cover image with each file.</small></div><input id="default-thumbnail" type="checkbox"></div>
+        <div class="setting-row"><div><strong>Completion notifications</strong></div><input id="notifications" type="checkbox"></div>
+        <div class="setting-row"><div><strong>Filename prefix</strong></div><input id="prefix" class="textsetting" placeholder="Optional"></div>
+        <div class="setting-row"><div><strong>Filename suffix</strong></div><input id="suffix" class="textsetting" placeholder="Optional"></div>
+        <div class="setting-row"><div><strong>Audio format</strong></div><select id="audio-format"><option>mp3</option><option>m4a</option><option>opus</option><option>wav</option><option>flac</option></select></div>
+        <div class="setting-row"><div><strong>Download engine</strong><small>yt-dlp and FFmpeg are included with the app.</small></div><span class="engine-mini" id="engine-detail">Checking</span></div>
+        <details class="about"><summary>About UNiPLAY</summary><p>Version 1.2.0. Save content you own, content offered under Creative Commons, or content YouTube makes available for download. Please respect YouTube's terms and creators' rights.</p></details>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="updates-panel" id="updates-panel" hidden><strong>UNiPLAY updates</strong><p id="updates-message">Checking for updates…</p><button class="primary small" id="updates-action" hidden>Get update</button><button class="subtle small" id="updates-refresh">Check again</button></div>
+<a class="creator-credit" href="https://instagram.com/ungyani" target="_blank" rel="noopener noreferrer">made with ❤️ by Ungyani <img src="icons/instagram.svg" alt="Instagram"></a>
+<div id="toast" class="toast" role="status"></div>
+<script src="app.js"></script>
+</body></html>
