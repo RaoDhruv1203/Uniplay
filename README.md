@@ -12,6 +12,7 @@ Download `UNiPLAY.exe` from this repository's [Releases](https://github.com/RaoD
 - In Clip, enter start/end times, choose Video or Audio and its quality, then select Download clip.
 - Library shows only completed files that still exist in their saved folder. Select files to move them to the Windows Recycle Bin.
 - Use Float on saved media to open the overlay. Saved local files support the compact audio player, Liked, and custom playlists.
+- Drag the floating player by its top strip, or resize it with the bottom-right grip. The window keeps the video's aspect ratio.
 - Live accepts a stream link or an `.m3u` playlist, including drag and drop.
 
 Downloads and playlists are stored locally. The app checks this repository's public latest release for updates and opens its installer link when a newer version is available. It does not upload your local files to GitHub.
@@ -23,3 +24,5 @@ Some online videos restrict embedding or include ads controlled by their provide
 Install Node.js and run `npm ci`. Place Windows builds of `yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, and `deno.exe` in `tools/`, with their respective license texts. Then run `npm run dist:win`. The third-party engine binaries and generated installers are intentionally excluded from this source repository; the release installer bundles the engine executables and license texts.
 
 The code is currently published for inspection; no open-source redistribution license is granted. Third-party components retain their own licenses.
+
+Maintainers can publish a tested Windows build with `node scripts/publish-release.cjs` after signing in to Git Credential Manager as the repository owner. The script reads the version from `package.json`, creates a draft, uploads only `release/UNiPLAY.exe`, verifies its size, then publishes it.

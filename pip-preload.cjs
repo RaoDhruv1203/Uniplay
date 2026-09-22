@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('downytPip', {
   pin: () => ipcRenderer.invoke('pip:pin'),
   searchVideos: query => ipcRenderer.invoke('video:search', query),
   selectYoutube: video => ipcRenderer.invoke('pip:youtube-select', video),
+  prepareAudio: url => ipcRenderer.invoke('pip:prepare-audio', url),
   catalog: () => ipcRenderer.invoke('audio:catalog'),
   playlists: () => ipcRenderer.invoke('playlists:list'),
   createPlaylist: name => ipcRenderer.invoke('playlists:create', name),
@@ -12,5 +13,8 @@ contextBridge.exposeInMainWorld('downytPip', {
   removeFromPlaylist: (id, itemId) => ipcRenderer.invoke('playlists:remove', id, itemId),
   playItem: item => ipcRenderer.invoke('pip:play-item', item),
   setAudioMode: compact => ipcRenderer.invoke('pip:mode', compact),
+  setAspect: ratio => ipcRenderer.invoke('pip:aspect', ratio),
+  moveTo: (x, y) => ipcRenderer.send('pip:drag', { x, y }),
+  resizeTo: width => ipcRenderer.send('pip:resize', width),
   onPlaylists: handler => ipcRenderer.on('playlists:changed', (_, lists) => handler(lists)),
 });

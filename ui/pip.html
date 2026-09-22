@@ -3,8 +3,10 @@
 <body><div class="pip" id="pip">
   <video id="video" autoplay playsinline></video>
   <iframe id="youtube-frame" title="YouTube player" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
-  <div class="shade"></div><div class="drag"></div>
-  <div class="top"><strong id="title">UNiPLAY</strong><div class="buttons"><button id="audio-mode" title="Compact audio mode"><img src="icons/music-2.svg" alt=""></button><button id="pin" title="Always on top"><img src="icons/pin.svg" alt=""></button><button id="close" title="Close"><img src="icons/x.svg" alt=""></button></div></div>
+  <div class="shade"></div><div class="drag" title="Drag player"></div>
+  <div class="top"><strong id="title">UNiPLAY</strong><div class="buttons"><button id="audio-mode" title="Audio mode"><img src="icons/music-2.svg" alt=""><span>Audio</span></button><button id="pin" title="Always on top"><img src="icons/pin.svg" alt=""></button><button id="close" title="Close"><img src="icons/x.svg" alt=""></button></div></div>
+  <div id="player-notice" role="status" aria-live="polite"></div>
+  <div id="resize-handle" title="Resize player" aria-label="Resize player"></div>
   <div class="controls"><button id="back" title="Previous channel"><img src="icons/skip-back.svg" alt=""></button><button id="rewind" title="Back 10 seconds"><img src="icons/rotate-ccw.svg" alt=""></button><button id="toggle" class="primary" title="Play or pause"><img src="icons/pause.svg" alt=""></button><button id="skip" title="Forward 10 seconds"><img src="icons/skip-forward.svg" alt=""></button><button id="forward" title="Next channel"><img src="icons/skip-forward.svg" alt=""></button></div>
   <div class="timeline"><input id="seek" type="range" min="0" max="1000" value="0" aria-label="Playback position"></div>
   <button id="explore-tab" title="Explore videos" aria-label="Explore videos"><img src="icons/search.svg" alt=""><span>Explore</span></button>

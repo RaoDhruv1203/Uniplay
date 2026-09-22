@@ -8,6 +8,7 @@ const { screen } = require('electron');
 const { driftDestination } = require('./drift.cjs');
 
 let win, pipWin, pipTimer, previousCursor, lastDrift = 0, settings, jobs = [], playlists = [], saveTimer, driftAnimation;
+let manualMoveUntil = 0, driftMoving = false, pipWindowMode = 'video', pipAspect = 16 / 9, videoWindowSize = [480, 270];
 let updateInfo = { status: 'checking', message: 'Checking for updates…' };
 const UPDATE_REPO = 'RaoDhruv1203/Uniplay';
 const active = new Map();
@@ -60,6 +61,7 @@ function startDrift() {
   pipTimer = setInterval(() => {
     if (!pipWin || pipWin.isDestroyed()) return;
     const point = screen.getCursorScreenPoint(), bounds = pipWin.getBounds(), band = 64;
+    if (Date.now() < manualMoveUntil) { previousCursor = point; return; }
     const inside = point.x >= bounds.x && point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height;
     const close = point.x >= bounds.x - band && point.x <= bounds.x + bounds.width + band && point.y >= bounds.y - band && point.y <= bounds.y + bounds.height + band;
     if (driftAnimation) {
@@ -67,7 +69,7 @@ function startDrift() {
       const eased = elapsed < 0.5 ? 4 * elapsed ** 3 : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
       const x = Math.round(driftAnimation.fromX + (driftAnimation.toX - driftAnimation.fromX) * eased);
       const y = Math.round(driftAnimation.fromY + (driftAnimation.toY - driftAnimation.fromY) * eased);
-      if (x !== bounds.x || y !== bounds.y) pipWin.setPosition(x, y, false);
+      if (x !== bounds.x || y !== bounds.y) { driftMoving = true; try { positionPip(x, y); } finally { driftMoving = false; } }
       if (elapsed === 1) driftAnimation = null;
       previousCursor = point; return;
     }
@@ -82,6 +84,51 @@ function startDrift() {
     if (target.x !== bounds.x || target.y !== bounds.y) { driftAnimation = { fromX: bounds.x, fromY: bounds.y, toX: target.x, toY: target.y, duration: target.duration, started: Date.now() }; lastDrift = Date.now(); }
     previousCursor = point;
   }, 16);
+}
+function positionPip(x, y) {
+  if (!pipWin || pipWin.isDestroyed()) return;
+  const size = pipWindowMode === 'video' ? videoWindowSize : [390, pipWindowMode === 'audio-expanded' ? 420 : 180];
+  pipWin.setBounds({ x: Math.round(x), y: Math.round(y), width: size[0], height: size[1] });
+}
+function setPipAspect(ratio) {
+  if (!pipWin || pipWin.isDestroyed() || !Number.isFinite(ratio) || ratio < 0.5 || ratio > 3) return false;
+  if (Math.abs(pipAspect - ratio) < 0.01) return true;
+  pipAspect = ratio;
+  if (pipWindowMode === 'video') resizePipTo(pipWin.getSize()[0]);
+  return true;
+}
+function resizePipTo(requestedWidth) {
+  if (!pipWin || pipWin.isDestroyed() || pipWindowMode !== 'video' || !Number.isFinite(requestedWidth)) return false;
+  const bounds = pipWin.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
+  const maximum = Math.max(240, Math.floor(Math.min(area.width - 48, (area.height - 48) * pipAspect)));
+  const minimum = Math.min(480, maximum);
+  const width = Math.max(minimum, Math.min(maximum, Math.round(requestedWidth)));
+  const height = Math.round(width / pipAspect);
+  const x = Math.max(area.x + 24, Math.min(area.x + area.width - width - 24, bounds.x));
+  const y = Math.max(area.y + 24, Math.min(area.y + area.height - height - 24, bounds.y));
+  pipWin.setBounds({ x, y, width, height });
+  videoWindowSize = [width, height];
+  manualMoveUntil = Date.now() + 2500;
+  return true;
+}
+function setPipMode(mode) {
+  if (!pipWin || pipWin.isDestroyed()) return false;
+  const compact = mode === 'audio' || mode === 'audio-expanded';
+  if (compact && pipWindowMode === 'video') {
+    videoWindowSize = pipWin.getSize();
+  }
+  if (!compact && pipWindowMode !== 'video') {
+    pipWin.setMinimumSize(240, 150);
+    pipWindowMode = 'video';
+    resizePipTo(videoWindowSize[0]);
+  } else if (compact && pipWindowMode !== mode) {
+    pipWin.setMinimumSize(320, 145);
+    pipWin.setSize(390, mode === 'audio-expanded' ? 420 : 180);
+  }
+  pipWindowMode = mode;
+  manualMoveUntil = Date.now() + 1500;
+  pipWin.moveTop();
+  return true;
 }
 function openPip(input) {
   let source;
@@ -99,11 +146,17 @@ function openPip(input) {
     source = { type: 'live', url: parsed.href, title: String(input.title || 'Live stream'), channels: Array.isArray(input.channels) ? input.channels.filter(s => { try { return ['http:', 'https:'].includes(new URL(s.url).protocol); } catch { return false; } }).slice(0, 200) : [] };
   }
   if (!pipWin || pipWin.isDestroyed()) {
-    pipWin = new BrowserWindow({ width: source.type === 'youtube' ? 480 : 360, height: source.type === 'youtube' ? 300 : 226, minWidth: 280, minHeight: 150, frame: false, transparent: true, alwaysOnTop: true, resizable: true, movable: true, skipTaskbar: false, hasShadow: true, backgroundColor: '#00000000', title: 'UNiPLAY Floating Player', webPreferences: { preload: path.join(__dirname, 'pip-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
-    pipWin.loadFile(path.join(__dirname, 'ui', 'pip.html'));
-    pipWin.on('closed', () => { clearInterval(pipTimer); pipWin = null; });
-    pipWin.webContents.once('did-finish-load', () => { pipWin.webContents.send('pip:source', source); pipWin.show(); pipWin.moveTop(); startDrift(); });
-  } else { if (source.type === 'youtube' && pipWin.getSize()[0] < 400) pipWin.setSize(480, 300); pipWin.webContents.send('pip:source', source); pipWin.show(); pipWin.moveTop(); pipWin.focus(); }
+    pipAspect = 16 / 9; pipWindowMode = 'video'; videoWindowSize = [480, 270]; previousCursor = null; driftAnimation = null;
+    pipWin = new BrowserWindow({ width: 480, height: 270, minWidth: 240, minHeight: 150, frame: false, transparent: true, alwaysOnTop: true, resizable: false, movable: true, skipTaskbar: false, hasShadow: true, backgroundColor: '#00000000', title: 'UNiPLAY Floating Player', webPreferences: { preload: path.join(__dirname, 'pip-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    const player = pipWin;
+    const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    player.setPosition(Math.max(area.x + 24, area.x + area.width - 504), Math.max(area.y + 24, area.y + area.height - 294));
+    player.on('will-move', () => { if (!driftMoving) { driftAnimation = null; manualMoveUntil = Date.now() + 6000; } });
+    player.on('will-resize', () => { manualMoveUntil = Date.now() + 2500; });
+    player.on('closed', () => { clearInterval(pipTimer); if (pipWin === player) pipWin = null; driftAnimation = null; });
+    player.webContents.once('did-finish-load', () => { if (player.isDestroyed() || player.webContents.isDestroyed()) return; player.webContents.send('pip:source', source); player.show(); player.moveTop(); startDrift(); });
+    player.loadFile(path.join(__dirname, 'ui', 'pip.html'));
+  } else { if (source.type !== 'file') { setPipMode('video'); setPipAspect(16 / 9); } pipWin.webContents.send('pip:source', source); pipWin.show(); pipWin.moveTop(); pipWin.focus(); }
   return true;
 }
 app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (process.env.DOWNYT_TEST_PROFILE) app.setPath('userData', process.env.DOWNYT_TEST_PROFILE); else {
@@ -118,7 +171,9 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
   // A file:// parent has no HTTP Referer, which YouTube rejects with player error 153.
   // Identify only DOWNYT's embedded player request; leave all other traffic untouched.
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['https://www.youtube.com/embed/*', 'https://www.youtube-nocookie.com/embed/*'], types: ['subFrame'] }, (details, callback) => {
-    if ((win && details.webContentsId === win.webContents.id || pipWin && details.webContentsId === pipWin.webContents.id) && !details.requestHeaders.Referer) details.requestHeaders.Referer = 'https://downyt.local/';
+    const mainContents = win && !win.isDestroyed() && !win.webContents.isDestroyed() ? win.webContents : null;
+    const playerContents = pipWin && !pipWin.isDestroyed() && !pipWin.webContents.isDestroyed() ? pipWin.webContents : null;
+    if ((details.webContentsId === mainContents?.id || details.webContentsId === playerContents?.id) && !details.requestHeaders.Referer) details.requestHeaders.Referer = 'https://downyt.local/';
     callback({ requestHeaders: details.requestHeaders });
   });
   app.on('web-contents-created', (_, contents) => contents.on('context-menu', (_, params) => {
@@ -160,7 +215,19 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
   ipcMain.handle('playlists:remove', (_, listId, itemId) => { const list = playlists.find(item => item.id === listId); if (!list) throw new Error('Playlist not found.'); list.items = list.items.filter(item => item.id !== itemId); emit(); return list; });
   ipcMain.handle('audio:catalog', () => libraryJobs().filter(job => job.kind !== 'thumbnail').map(itemForJob));
   ipcMain.handle('pip:play-item', (_, item) => item.type === 'job' ? openPip({ jobId: item.id }) : openPip({ youtubeUrl: item.url, title: item.title, channel: item.channel }));
-  ipcMain.handle('pip:mode', (_, mode) => { if (!pipWin || pipWin.isDestroyed()) return false; const compact = mode === 'audio' || mode === 'audio-expanded'; pipWin.setMinimumSize(compact ? 320 : 280, compact ? 145 : 150); pipWin.setSize(compact ? 390 : 480, mode === 'audio-expanded' ? 420 : compact ? 180 : 300, true); pipWin.moveTop(); return true; });
+  ipcMain.handle('pip:mode', (_, mode) => setPipMode(mode));
+  ipcMain.handle('pip:aspect', (_, ratio) => setPipAspect(Number(ratio)));
+  ipcMain.on('pip:drag', (_, position) => {
+    if (!pipWin || pipWin.isDestroyed()) return;
+    const x = Number(position?.x), y = Number(position?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const bounds = pipWin.getBounds(), area = screen.getDisplayNearestPoint({ x, y }).workArea;
+    const nextX = Math.max(area.x + 12, Math.min(area.x + area.width - bounds.width - 12, Math.round(x)));
+    const nextY = Math.max(area.y + 12, Math.min(area.y + area.height - bounds.height - 12, Math.round(y)));
+    driftAnimation = null; manualMoveUntil = Date.now() + 6000;
+    positionPip(nextX, nextY);
+  });
+  ipcMain.on('pip:resize', (_, width) => { driftAnimation = null; resizePipTo(Number(width)); });
   ipcMain.handle('video:analyze', (_, url) => analyze(url));
   ipcMain.handle('video:search', (_, query) => searchVideos(query));
   ipcMain.handle('updates:check', () => checkUpdates());
@@ -173,6 +240,7 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
   ipcMain.handle('folder:open', (_, filePath, folder) => filePath && fs.existsSync(filePath) ? shell.showItemInFolder(filePath) : shell.openPath(folder && fs.existsSync(folder) ? folder : settings.folder));
   ipcMain.handle('pip:open', (_, input) => openPip(input));
   ipcMain.handle('pip:youtube-select', (_, video) => openPip({ youtubeUrl: video.url, title: video.title, channel: video.channel }));
+  ipcMain.handle('pip:prepare-audio', (_, url) => { if (!youtubeId(url)) throw new Error('This video cannot be saved as audio.'); if (!win || win.isDestroyed()) createWindow(); win.show(); win.focus(); const contents = win.webContents; if (contents.isLoading()) contents.once('did-finish-load', () => { if (!contents.isDestroyed()) contents.send('download:prepare-audio', url); }); else contents.send('download:prepare-audio', url); return true; });
   ipcMain.handle('pip:close', () => { pipWin?.close(); return true; });
   ipcMain.handle('pip:pin', () => { if (!pipWin || pipWin.isDestroyed()) return false; pipWin.setAlwaysOnTop(!pipWin.isAlwaysOnTop()); return pipWin.isAlwaysOnTop(); });
   createWindow(); processQueue(); setTimeout(checkUpdates, 2500); setInterval(checkUpdates, 24 * 60 * 60 * 1000).unref(); app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });

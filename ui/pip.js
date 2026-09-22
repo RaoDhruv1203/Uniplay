@@ -3,8 +3,20 @@ const pip = document.querySelector('#pip');
 const toggle = document.querySelector('#toggle img');
 const seek = document.querySelector('#seek');
 const youtubeFrame = document.querySelector('#youtube-frame');
+const dragHandle = document.querySelector('.drag');
+const resizeHandle = document.querySelector('#resize-handle');
+let dragStart;
+dragHandle.addEventListener('pointerdown', event => { if (event.button !== 0) return; dragStart = { screenX: event.screenX, screenY: event.screenY, windowX: window.screenX, windowY: window.screenY }; dragHandle.setPointerCapture(event.pointerId); event.preventDefault(); });
+dragHandle.addEventListener('pointermove', event => { if (!dragStart) return; window.downytPip.moveTo(dragStart.windowX + event.screenX - dragStart.screenX, dragStart.windowY + event.screenY - dragStart.screenY); });
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) dragHandle.addEventListener(type, () => { dragStart = null; });
+let resizeStart;
+resizeHandle.addEventListener('pointerdown', event => { if (event.button !== 0) return; resizeStart = { screenX: event.screenX, screenY: event.screenY, width: window.innerWidth, ratio: window.innerWidth / window.innerHeight }; resizeHandle.setPointerCapture(event.pointerId); event.preventDefault(); });
+resizeHandle.addEventListener('pointermove', event => { if (!resizeStart) return; const dx = event.screenX - resizeStart.screenX, dy = (event.screenY - resizeStart.screenY) * resizeStart.ratio; window.downytPip.resizeTo(resizeStart.width + (Math.abs(dx) >= Math.abs(dy) ? dx : dy)); });
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) resizeHandle.addEventListener(type, () => { resizeStart = null; });
 let source, hls, channelIndex = -1, exploreResults = [], searchSequence = 0;
 let audioMode = false, shelfOpen = false, playlists = [], catalog = [], activePlaylist = 'liked';
+let noticeTimer;
+function playerNotice(message) { const notice = document.querySelector('#player-notice'); notice.textContent = message; notice.classList.add('visible'); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => notice.classList.remove('visible'), 5200); }
 const escaped = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 const formatTime = seconds => Math.floor((Number(seconds) || 0) / 60) + ':' + String(Math.floor(Number(seconds) || 0) % 60).padStart(2, '0');
 function load(next) {
@@ -37,6 +49,7 @@ document.querySelector('#close').onclick = () => window.downytPip.close();
 document.querySelector('#pin').onclick = async () => { const pinned = await window.downytPip.pin(); document.querySelector('#pin img').src = pinned ? 'icons/pin.svg' : 'icons/pin-off.svg'; };
 document.querySelector('#toggle').onclick = () => video.paused ? video.play() : video.pause();
 video.onplay = () => { toggle.src = 'icons/pause.svg'; document.querySelector('#audio-toggle img').src = 'icons/pause.svg'; };
+video.onloadedmetadata = () => { if (video.videoWidth && video.videoHeight) window.downytPip.setAspect(video.videoWidth / video.videoHeight).catch(() => {}); };
 video.onpause = () => { toggle.src = 'icons/play.svg'; document.querySelector('#audio-toggle img').src = 'icons/play.svg'; };
 document.querySelector('#rewind').onclick = () => { if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, video.currentTime - 10); };
 document.querySelector('#skip').onclick = () => { if (Number.isFinite(video.duration)) video.currentTime = Math.min(video.duration, video.currentTime + 10); };
@@ -47,7 +60,7 @@ video.ontimeupdate = () => { if (!Number.isFinite(video.duration) || !video.dura
 seek.oninput = () => { if (Number.isFinite(video.duration)) video.currentTime = Number(seek.value) / 1000 * video.duration; };
 document.querySelector('#audio-seek').oninput = event => { if (Number.isFinite(video.duration)) video.currentTime = Number(event.target.value) / 1000 * video.duration; };
 async function setAudioMode(enabled, expanded = false) { audioMode = enabled; shelfOpen = expanded && enabled; pip.classList.toggle('audio-mode', enabled); pip.classList.toggle('audio-expanded', shelfOpen); await window.downytPip.setAudioMode(shelfOpen ? 'audio-expanded' : enabled ? 'audio' : 'video'); if (enabled) refreshAudioData(); }
-document.querySelector('#audio-mode').onclick = () => setAudioMode(!audioMode);
+document.querySelector('#audio-mode').onclick = async () => { if (source?.type === 'file') { setAudioMode(!audioMode).catch(error => playerNotice(error.message)); return; } if (source?.type === 'youtube') { try { await window.downytPip.prepareAudio(source.url); playerNotice('Choose a quality and download. Open the saved file to use Audio mode.'); } catch (error) { playerNotice(error.message); } return; } playerNotice('Audio mode is available for saved files.'); };
 document.querySelector('#audio-toggle').onclick = () => video.paused ? video.play() : video.pause();
 document.querySelector('#audio-list').onclick = () => setAudioMode(true, !shelfOpen);
 document.querySelector('#audio-shelf-close').onclick = () => setAudioMode(true, false);
@@ -108,5 +121,5 @@ document.querySelector('#explore-tab').addEventListener('click', () => pip.class
 document.querySelector('#explore-close').addEventListener('click', () => pip.classList.remove('exploring'));
 document.querySelector('#explore-go').addEventListener('click', () => searchExplore(document.querySelector('#explore-query').value));
 document.querySelector('#explore-query').addEventListener('keydown', event => { if (event.key === 'Enter') searchExplore(event.target.value); });
-document.querySelector('#explore-results').addEventListener('click', async event => { const button = event.target.closest('[data-index]'); if (!button) return; const item = exploreResults[Number(button.dataset.index)]; if (!item) return; await window.downytPip.selectYoutube(item); });
+document.querySelector('#explore-results').addEventListener('click', async event => { const button = event.target.closest('[data-index]'); if (!button) return; const item = exploreResults[Number(button.dataset.index)]; if (!item) return; button.disabled = true; try { await window.downytPip.selectYoutube(item); } catch (error) { playerNotice(error.message || 'Could not switch video.'); button.disabled = false; } });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (pip.classList.contains('exploring')) pip.classList.remove('exploring'); else window.downytPip.close(); } if (event.key === ' ' && source?.type !== 'youtube' && event.target.tagName !== 'INPUT') { event.preventDefault(); video.paused ? video.play() : video.pause(); } });
