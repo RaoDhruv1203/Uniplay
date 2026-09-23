@@ -14,7 +14,7 @@ Download `UNiPLAY.exe` from this repository's [Releases](https://github.com/RaoD
 - Use Float on saved media to open the overlay. Saved local files support the compact audio player, Liked, and custom playlists.
 - Drag the floating player by its top strip, or resize it with the bottom-right grip. The window keeps the video's aspect ratio.
 - YouTube plays inside the app first; use Float to open a separate player. YouTube's player must remain visible, so its floating mode cannot become audio-only.
-- Live accepts a stream link or an `.m3u` playlist, including drag and drop. Playlists keep categories and favorites; individual links go to a selectable history that can be exported as M3U.
+- Live accepts a stream link or an `.m3u` playlist from a file, drag and drop, or a web URL. Link-based playlists update only when you click the refresh icon beside the selected playlist; matching channel favorites are preserved. Individual links go to a selectable history that can be exported as M3U.
 - Live Studio can queue local videos or M3U8 streams, add text, logos, images, and GIF layers, then broadcast a shareable HLS link. The built-in link works on your local network. Internet viewers require router port forwarding or a relay, and Windows Firewall may prompt for access.
 
 Downloads and playlists are stored locally. The app checks this repository's public latest release for updates. The bell shows a dot when an update is available; it downloads the installer, verifies its SHA-256 digest and size against GitHub's release metadata, then installs it over the existing installation. It does not upload your local files to GitHub.

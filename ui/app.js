@@ -216,6 +216,15 @@ $('#download-clip').addEventListener('click', async () => {
 });
 $('#clip-folder').addEventListener('click', () => window.downyt.openFolder(null, state.settings.folder));
 function saveIptv() { localStorage.setItem('uniplay-iptv-v2', JSON.stringify(iptv)); }
+const playlistLinkRow = document.createElement('div');
+playlistLinkRow.className = 'playlist-link-row';
+playlistLinkRow.innerHTML = '<input id="playlist-url" type="url" placeholder="M3U playlist URL" aria-label="M3U playlist URL"><button class="subtle small" id="playlist-url-add"><img src="icons/link.svg" alt=""> Add playlist</button>';
+$('#playlist-drop').after(playlistLinkRow);
+const playlistRefresh = document.createElement('button');
+playlistRefresh.className = 'iconbutton'; playlistRefresh.id = 'iptv-refresh-playlist';
+playlistRefresh.title = 'Update this playlist from its link'; playlistRefresh.setAttribute('aria-label', playlistRefresh.title);
+playlistRefresh.innerHTML = '<img src="icons/rotate-cw.svg" alt="">';
+$('#iptv-source').after(playlistRefresh);
 function activeChannels() { return $('#iptv-source').value === 'history' ? iptv.history : iptv.playlists.find(p => p.id === $('#iptv-source').value)?.channels || []; }
 function renderStreams() {
   $('#streams').classList.toggle('grid', iptvGrid);
@@ -225,6 +234,7 @@ function renderStreams() {
   $('#iptv-source').value = iptv.playlists.some(p => p.id === selected) ? selected : 'history';
   const history = $('#iptv-source').value === 'history';
   $('#iptv-remove-playlist').disabled = history;
+  $('#iptv-refresh-playlist').disabled = !iptv.playlists.find(p => p.id === $('#iptv-source').value)?.sourceUrl;
   $('#iptv-history-actions').hidden = !history;
   const channels = activeChannels();
   const category = $('#iptv-category').value;
@@ -293,6 +303,51 @@ function parsePlaylist(text) {
   }
   return found;
 }
+async function fetchPlaylist(address) {
+  let url;
+  try { url = new URL(address); } catch { throw new Error('Enter a valid M3U playlist URL.'); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS playlist URL.');
+  const response = await window.streamBridge.fetch({ url: url.href });
+  if (response.status !== 200 || !response.data) throw new Error(response.status === 401 || response.status === 403 ? 'This playlist needs access or is blocking UNiPLAY.' : response.status === 404 ? 'Playlist link not found. Check the URL.' : 'Could not load this playlist. Check the link and try again.');
+  if (response.data.length > 2 * 1024 * 1024) throw new Error('This playlist is too large. Use a file under 2 MB.');
+  const text = new TextDecoder().decode(response.data);
+  if (!/^\uFEFF?#EXTM3U\b/.test(text)) throw new Error('This link did not return an M3U playlist.');
+  const channels = parsePlaylist(text);
+  if (!channels.length) throw new Error('No playable online channels were found in this playlist.');
+  return channels;
+}
+$('#playlist-url-add').addEventListener('click', async () => {
+  const button = $('#playlist-url-add'), sourceUrl = $('#playlist-url').value.trim(); button.disabled = true;
+  try {
+    let parsed;
+    try { parsed = new URL(sourceUrl); } catch { throw new Error('Enter a valid M3U playlist URL.'); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Use an HTTP or HTTPS playlist URL.');
+    if (iptv.playlists.some(p => p.sourceUrl === parsed.href)) throw new Error('This playlist is already added. Select it and use its refresh icon.');
+    const channels = await fetchPlaylist(sourceUrl);
+    const url = parsed;
+    let filename = url.pathname.split('/').pop() || '';
+    try { filename = decodeURIComponent(filename); } catch { /* Keep the URL-encoded name if it is malformed. */ }
+    filename = filename.replace(/\.m3u8?$/i, '').replace(/[-_]+/g, ' ').trim();
+    const playlist = { id: crypto.randomUUID(), name: filename || url.hostname, sourceUrl: url.href, channels, updatedAt: new Date().toISOString() };
+    iptv.playlists.push(playlist); saveIptv(); renderStreams(); $('#iptv-source').value = playlist.id; renderStreams();
+    $('#playlist-url').value = ''; setFeedback('#live-feedback', ''); toast(`${channels.length} channels added. Update manually with the refresh icon.`);
+  } catch (error) { setFeedback('#live-feedback', error.message); }
+  finally { button.disabled = false; }
+});
+$('#playlist-url').addEventListener('keydown', event => { if (event.key === 'Enter') $('#playlist-url-add').click(); });
+$('#iptv-refresh-playlist').addEventListener('click', async () => {
+  const playlist = iptv.playlists.find(p => p.id === $('#iptv-source').value);
+  if (!playlist?.sourceUrl) return;
+  const button = $('#iptv-refresh-playlist'); button.disabled = true; button.classList.add('refreshing');
+  try {
+    const incoming = await fetchPlaylist(playlist.sourceUrl);
+    const existing = new Map(playlist.channels.map(channel => [channel.url, channel]));
+    playlist.channels = incoming.map(channel => ({ ...channel, id: existing.get(channel.url)?.id || channel.id, favorite: !!existing.get(channel.url)?.favorite }));
+    playlist.updatedAt = new Date().toISOString(); saveIptv(); renderStreams();
+    setFeedback('#live-feedback', ''); toast(`${playlist.name} updated · ${incoming.length} channels`);
+  } catch (error) { setFeedback('#live-feedback', 'Update failed: ' + error.message); }
+  finally { button.classList.remove('refreshing'); button.disabled = !iptv.playlists.find(p => p.id === $('#iptv-source').value)?.sourceUrl; }
+});
 async function importPlaylist(file) {
   if (!file) return;
   try {

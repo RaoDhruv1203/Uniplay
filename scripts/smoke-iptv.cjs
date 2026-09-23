@@ -9,12 +9,14 @@ const path = require('node:path');
   const root = path.join(__dirname, '..');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'uniplay-iptv-'));
   const segment = path.join(temp, 'clip.ts');
+  let playlistRevision = 1, playlistOffline = false;
   const made = spawnSync(path.join(root, 'tools', 'ffmpeg.exe'), ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=15', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', '4', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-f', 'mpegts', segment], { timeout: 30000 });
   if (made.status !== 0) throw new Error('Could not prepare test stream: ' + made.stderr?.toString());
   console.log('Segment bytes:', fs.statSync(segment).size);
   const server = createServer((req, res) => {
     console.log('Stream request:', req.url);
     if (req.url === '/live.m3u8') { res.setHeader('content-type', 'application/vnd.apple.mpegurl'); res.end('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nclip.ts\n#EXT-X-ENDLIST\n'); }
+    else if (req.url === '/channels.m3u') { if (playlistOffline) { res.statusCode = 503; res.end(); } else { res.setHeader('content-type', 'audio/x-mpegurl'); res.end(`#EXTM3U\n#EXTINF:-1 group-title="News",Local News\n${url}\n` + (playlistRevision > 1 ? `#EXTINF:-1 group-title="Sports",Sports Extra\n${url.replace('live.m3u8', 'sport.m3u8')}\n` : '')); } }
     else if (req.url === '/clip.ts') { res.setHeader('content-type', 'video/mp2t'); res.end(fs.readFileSync(segment)); }
     else { res.statusCode = 404; res.end(); }
   });
@@ -45,6 +47,24 @@ const path = require('node:path');
     await page.locator('#iptv-view').click();
     await page.locator('#streams:not(.grid)').waitFor();
     await page.locator('.iptv-heart').click();
+    if (!(await page.locator('#iptv-refresh-playlist').isDisabled())) throw new Error('File playlist unexpectedly offered URL refresh');
+    await page.locator('#playlist-url').fill(url.replace('live.m3u8', 'channels.m3u'));
+    await page.locator('#playlist-url-add').click();
+    await page.locator('#iptv-source').selectOption({ label: 'channels (1)' });
+    if (await page.locator('#iptv-refresh-playlist').isDisabled()) throw new Error('Link playlist refresh was disabled');
+    await page.locator('.iptv-heart').click();
+    playlistRevision = 2;
+    await page.waitForTimeout(200);
+    if (await page.locator('.iptv-channel').count() !== 1) throw new Error('Link playlist updated automatically');
+    await page.locator('#iptv-refresh-playlist').click();
+    await page.locator('#iptv-source').selectOption({ label: 'channels (2)' });
+    await page.locator('#iptv-category').selectOption('all');
+    if (await page.locator('.iptv-channel').count() !== 2 || !(await page.locator('.iptv-heart').first().getAttribute('class')).includes('active')) throw new Error('Manual playlist refresh lost channels or favorites');
+    playlistOffline = true;
+    await page.locator('#iptv-refresh-playlist').click();
+    await page.waitForFunction(() => document.querySelector('#live-feedback').textContent.startsWith('Update failed:'));
+    if (await page.locator('.iptv-channel').count() !== 2) throw new Error('Failed playlist refresh erased saved channels');
+    playlistOffline = false;
     await page.locator('#iptv-source').selectOption('history');
     await page.locator('.iptv-select').check();
     await page.locator('#iptv-export').click();

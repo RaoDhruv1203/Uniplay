@@ -5,10 +5,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { screen } = require('electron');
-const { driftDestination } = require('./drift.cjs');
+const { driftDestination, approachSpeed } = require('./drift.cjs');
 const { registerStudio } = require('./studio.cjs');
 
-let win, pipWin, pipTimer, previousCursor, lastDrift = 0, settings, jobs = [], playlists = [], saveTimer, driftAnimation;
+let win, pipWin, pipTimer, previousCursor, previousCursorAt = 0, fastApproachUntil = 0, settings, jobs = [], playlists = [], saveTimer, driftAnimation;
 let manualMoveUntil = 0, driftMoving = false, pipWindowMode = 'video', pipAspect = 16 / 9, videoWindowSize = [480, 270], pipSourceType = 'file', pipSourceUrl = '';
 let updateInfo = { status: 'checking', message: 'Checking for updates…' };
 const UPDATE_REPO = 'RaoDhruv1203/Uniplay';
@@ -116,29 +116,32 @@ function startDrift() {
   clearInterval(pipTimer);
   pipTimer = setInterval(() => {
     if (!pipWin || pipWin.isDestroyed()) return;
-    const point = screen.getCursorScreenPoint(), bounds = pipWin.getBounds(), band = 110;
-    if (Date.now() < manualMoveUntil) { previousCursor = point; return; }
+    const point = screen.getCursorScreenPoint(), bounds = pipWin.getBounds(), band = 110, now = Date.now();
+    const previous = previousCursor, elapsed = now - previousCursorAt;
+    previousCursor = point; previousCursorAt = now;
+    if (now < manualMoveUntil) return;
     const inside = point.x >= bounds.x && point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height;
     const close = point.x >= bounds.x - band && point.x <= bounds.x + bounds.width + band && point.y >= bounds.y - band && point.y <= bounds.y + bounds.height + band;
     if (driftAnimation) {
-      const elapsed = Math.min(1, (Date.now() - driftAnimation.started) / driftAnimation.duration);
-      const eased = 1 - Math.pow(1 - elapsed, 3);
+      if (close && previous && approachSpeed(previous, point, elapsed) > 780) { driftAnimation = null; fastApproachUntil = now + 650; return; }
+      const progress = Math.min(1, (now - driftAnimation.started) / driftAnimation.duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
       const x = Math.round(driftAnimation.fromX + (driftAnimation.toX - driftAnimation.fromX) * eased);
       const y = Math.round(driftAnimation.fromY + (driftAnimation.toY - driftAnimation.fromY) * eased);
       if (x !== bounds.x || y !== bounds.y) { driftMoving = true; try { positionPip(x, y); } finally { driftMoving = false; } }
-      if (elapsed === 1) driftAnimation = null;
-      previousCursor = point; return;
+      if (progress === 1) driftAnimation = null;
+      return;
     }
-    if (inside) { previousCursor = point; return; }
-    if (!close || !previousCursor) { previousCursor = point; return; }
+    if (inside || !close || !previous) return;
     const centerX = bounds.x + bounds.width / 2, centerY = bounds.y + bounds.height / 2;
     const nowDistance = Math.hypot(point.x - centerX, point.y - centerY);
-    const priorDistance = Math.hypot(previousCursor.x - centerX, previousCursor.y - centerY);
-    if (nowDistance >= priorDistance - 1) { previousCursor = point; return; }
+    const priorDistance = Math.hypot(previous.x - centerX, previous.y - centerY);
+    const toward = nowDistance < priorDistance - .7;
+    if (toward && approachSpeed(previous, point, elapsed) > 780) { fastApproachUntil = now + 650; return; }
+    if (!toward || now < fastApproachUntil) return;
     const display = screen.getDisplayMatching(bounds).workArea;
     const target = driftDestination(bounds, point, display);
-    if (target.x !== bounds.x || target.y !== bounds.y) { driftAnimation = { fromX: bounds.x, fromY: bounds.y, toX: target.x, toY: target.y, duration: target.duration, started: Date.now() }; lastDrift = Date.now(); }
-    previousCursor = point;
+    if (target.x !== bounds.x || target.y !== bounds.y) driftAnimation = { fromX: bounds.x, fromY: bounds.y, toX: target.x, toY: target.y, duration: target.duration, started: now };
   }, 16);
 }
 function positionPip(x, y) {
@@ -205,7 +208,7 @@ function openPip(input) {
   pipSourceType = source.type;
   pipSourceUrl = source.url;
   if (!pipWin || pipWin.isDestroyed()) {
-    pipAspect = 16 / 9; pipWindowMode = 'video'; videoWindowSize = [480, 270]; previousCursor = null; driftAnimation = null;
+    pipAspect = 16 / 9; pipWindowMode = 'video'; videoWindowSize = [480, 270]; previousCursor = null; previousCursorAt = 0; fastApproachUntil = 0; driftAnimation = null;
     pipWin = new BrowserWindow({ width: 480, height: 270, minWidth: 240, minHeight: 150, frame: false, transparent: true, alwaysOnTop: true, resizable: false, movable: true, skipTaskbar: false, hasShadow: false, backgroundColor: '#00000000', title: 'UNiPLAY Floating Player', webPreferences: { preload: path.join(__dirname, 'pip-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     const player = pipWin;
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
@@ -291,7 +294,7 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
     driftAnimation = null; manualMoveUntil = Date.now() + 300;
     positionPip(nextX, nextY);
   });
-  ipcMain.on('pip:drag-end', () => { manualMoveUntil = 0; previousCursor = screen.getCursorScreenPoint(); lastDrift = Date.now() - 900; });
+  ipcMain.on('pip:drag-end', () => { manualMoveUntil = 0; previousCursor = screen.getCursorScreenPoint(); previousCursorAt = Date.now(); fastApproachUntil = 0; });
   ipcMain.on('pip:resize', (_, width) => { driftAnimation = null; resizePipTo(Number(width)); });
   ipcMain.handle('video:analyze', (_, url) => analyze(url));
   ipcMain.handle('video:search', (_, query) => searchVideos(query));

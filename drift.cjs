@@ -15,7 +15,12 @@ function driftDestination(bounds, cursor, workArea) {
     else y = cursor.y < workArea.y + workArea.height / 2 ? bottom : top;
   }
   const distance = Math.hypot(x - bounds.x, y - bounds.y);
-  return { x, y, duration: Math.max(300, Math.min(500, Math.round(distance * 0.48))) };
+  return { x, y, duration: Math.max(180, Math.min(320, Math.round(distance * 0.3))) };
 }
 
-module.exports = { driftDestination };
+function approachSpeed(previous, current, elapsedMs) {
+  if (!previous || !Number.isFinite(elapsedMs) || elapsedMs <= 0) return 0;
+  return Math.hypot(current.x - previous.x, current.y - previous.y) * 1000 / elapsedMs;
+}
+
+module.exports = { driftDestination, approachSpeed };
