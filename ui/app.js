@@ -6,6 +6,7 @@ const oldStreams = JSON.parse(localStorage.getItem('downyt-streams') || '[]');
 let iptv = JSON.parse(localStorage.getItem('uniplay-iptv-v2') || 'null') || { playlists: [], history: oldStreams.map(s => ({ ...s, favorite: false })) };
 let currentStream = null, liveHls = null, currentYoutube = null, liveAttempt = 0, liveStatusTimer, liveTimeout;
 let iptvGrid = localStorage.getItem('uniplay-iptv-grid') === 'true';
+let iptvTileSize = Math.max(150, Math.min(480, Number(localStorage.getItem('uniplay-iptv-tile-size')) || 240));
 const icons = { video: 'video', audio: 'music-2', thumbnail: 'image', 'clip-video': 'scissors', 'clip-audio': 'scissors' };
 const escaped = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = (name, title, action, id) => '<button class="iconbutton" title="' + title + '" aria-label="' + title + '" data-action="' + action + '" data-id="' + id + '"><img src="icons/' + name + '.svg" alt=""></button>';
@@ -171,7 +172,9 @@ $('#clip-preview').addEventListener('click', async () => {
     $('#clip-editor').hidden = false; updateClipTimes();
     renderClipQuality();
     $('#clip-folder').textContent = 'Save to ' + state.settings.folder + '  ↗';
-    $('#clip-player').src = 'https://www.youtube.com/embed/' + encodeURIComponent(clipInfo.id) + '?rel=0';
+    const clipVideo = $('#clip-player'), clipEmbed = $('#clip-embed');
+    clipVideo.hidden = !clipInfo.playbackUrl; clipEmbed.hidden = !!clipInfo.playbackUrl;
+    clipVideo.src = clipInfo.playbackUrl || ''; clipEmbed.src = clipInfo.playbackUrl ? '' : 'https://www.youtube.com/embed/' + encodeURIComponent(clipInfo.id) + '?rel=0';
   } catch (error) { clipInfo = null; $('#clip-editor').hidden = true; setFeedback('#clip-feedback', error.message); }
 });
 function updateClipTimes(changed = '') {
@@ -197,7 +200,9 @@ for (const [field, slider, other] of [['#start-time', '#clip-start', '#clip-end'
   input.addEventListener('keydown', event => { if (event.key === 'Enter') { applyTime(); input.blur(); } });
   input.addEventListener('input', () => input.classList.remove('invalid'));
 }
-$('#play-range').addEventListener('click', () => { if (!clipInfo) return; $('#clip-player').src = 'https://www.youtube.com/embed/' + encodeURIComponent(clipInfo.id) + '?autoplay=1&start=' + $('#clip-start').value + '&end=' + $('#clip-end').value; });
+$('#play-range').addEventListener('click', () => { if (!clipInfo) return; if (!$('#clip-player').hidden) { $('#clip-player').currentTime = Number($('#clip-start').value); $('#clip-player').play().catch(error => setFeedback('#clip-feedback', error.message)); } else $('#clip-embed').src = 'https://www.youtube.com/embed/' + encodeURIComponent(clipInfo.id) + '?autoplay=1&start=' + $('#clip-start').value + '&end=' + $('#clip-end').value; });
+$('#clip-player').addEventListener('timeupdate', () => { if (clipInfo && $('#clip-player').currentTime >= Number($('#clip-end').value)) $('#clip-player').pause(); });
+$('#clip-player').addEventListener('error', () => { if (!clipInfo) return; $('#clip-player').hidden = true; $('#clip-embed').hidden = false; $('#clip-embed').src = 'https://www.youtube.com/embed/' + encodeURIComponent(clipInfo.id) + '?rel=0'; setFeedback('#clip-feedback', 'Direct preview was unavailable. Trying the YouTube player.'); });
 function renderClipQuality() {
   if (!clipInfo) return;
   const options = clipMode === 'video' ? [{ value: 'best', label: 'Best available' }, ...clipInfo.resolutions.map(height => ({ value: String(height), label: height + 'p' }))] :
@@ -222,7 +227,7 @@ $('#clip-folder').addEventListener('click', () => window.downyt.openFolder(null,
 function saveIptv() { localStorage.setItem('uniplay-iptv-v2', JSON.stringify(iptv)); }
 const playlistLinkRow = document.createElement('div');
 playlistLinkRow.className = 'playlist-link-row';
-playlistLinkRow.innerHTML = '<input id="playlist-url" type="url" placeholder="M3U playlist URL" aria-label="M3U playlist URL"><button class="subtle small" id="playlist-url-add"><img src="icons/link.svg" alt=""> Add playlist</button>';
+playlistLinkRow.innerHTML = '<input id="playlist-url" type="url" placeholder="M3U / M3U8 playlist URL" aria-label="M3U or M3U8 playlist URL"><button class="subtle small" id="playlist-url-add"><img src="icons/link.svg" alt=""> Add playlist</button>';
 $('#playlist-drop').after(playlistLinkRow);
 const playlistRefresh = document.createElement('button');
 playlistRefresh.className = 'iconbutton'; playlistRefresh.id = 'iptv-refresh-playlist';
@@ -232,6 +237,9 @@ $('#iptv-source').after(playlistRefresh);
 function activeChannels() { return $('#iptv-source').value === 'history' ? iptv.history : iptv.playlists.find(p => p.id === $('#iptv-source').value)?.channels || []; }
 function renderStreams() {
   $('#streams').classList.toggle('grid', iptvGrid);
+  $('#streams').style.setProperty('--tile-width', `${iptvTileSize}px`);
+  $('#iptv-tile-control').hidden = !iptvGrid;
+  $('#iptv-tile-size').value = String(iptvTileSize);
   $('#iptv-view').innerHTML = '<img src="icons/' + (iptvGrid ? 'list' : 'layout-grid') + '.svg" alt=""> ' + (iptvGrid ? 'List view' : 'Grid view');
   const selected = $('#iptv-source').value || 'history';
   $('#iptv-source').innerHTML = '<option value="history">Link history</option>' + iptv.playlists.map(p => '<option value="' + escaped(p.id) + '">' + escaped(p.name) + ' (' + p.channels.length + ')</option>').join('');
@@ -286,6 +294,7 @@ document.addEventListener('pointerdown', event => { if (channelMenu && !channelM
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeChannelMenu(); });
 $('#iptv-source').addEventListener('change', renderStreams);
 $('#iptv-view').addEventListener('click', () => { iptvGrid = !iptvGrid; localStorage.setItem('uniplay-iptv-grid', String(iptvGrid)); renderStreams(); });
+$('#iptv-tile-size').addEventListener('input', event => { iptvTileSize = Number(event.target.value); localStorage.setItem('uniplay-iptv-tile-size', String(iptvTileSize)); $('#streams').style.setProperty('--tile-width', `${iptvTileSize}px`); });
 $('#iptv-search').addEventListener('input', renderStreams);
 $('#iptv-category').addEventListener('change', renderStreams);
 $('#iptv-remove-playlist').addEventListener('click', () => { const id = $('#iptv-source').value; if (id === 'history') return; const list = iptv.playlists.find(p => p.id === id); if (!list || !confirm('Remove playlist "' + list.name + '" from UNiPLAY?')) return; iptv.playlists = iptv.playlists.filter(p => p.id !== id); saveIptv(); $('#iptv-source').value = 'history'; renderStreams(); });
@@ -294,29 +303,52 @@ function selectedHistory() { return [...document.querySelectorAll('.iptv-select:
 $('#iptv-delete').addEventListener('click', () => { const chosen = selectedHistory(); if (!chosen.length) return; iptv.history = iptv.history.filter(s => !chosen.some(c => c.id === s.id)); saveIptv(); $('#iptv-select-all').checked = false; renderStreams(); });
 $('#iptv-export').addEventListener('click', async () => { const chosen = selectedHistory(); if (!chosen.length) { toast('Select links to export.'); return; } const content = '#EXTM3U\n' + chosen.map(s => '#EXTINF:-1 group-title="' + (s.group || '').replace(/"/g, '') + '",' + s.name.replace(/[\r\n]/g, ' ') + '\n' + s.url).join('\n') + '\n'; try { const file = await window.streamBridge.exportM3u(content); if (file) toast('Playlist saved.'); } catch (error) { toast(error.message); } });
 $('#live-float').addEventListener('click', async () => { if (!currentStream) return; try { const opened = await window.downyt.togglePip({ streamUrl: currentStream.url, title: currentStream.name, channels: activeChannels() }); if (opened) $('#live-video').pause(); } catch (error) { setFeedback('#live-feedback', error.message); } });
-function parsePlaylist(text) {
-  if (/^#EXT-X-/m.test(text)) throw new Error('This is an HLS stream manifest. Paste its online M3U8 URL above.');
+function parsePlaylist(text, baseUrl = '') {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim());
+  const onlineUrl = item => { try { const url = new URL(item, baseUrl || undefined); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; } catch { return ''; } };
+  if (lines.some(line => line.startsWith('#EXT-X-'))) {
+    const variants = []; let streamInfo = '';
+    for (const item of lines) {
+      if (item.startsWith('#EXT-X-STREAM-INF:')) { streamInfo = item.slice(18); continue; }
+      if (!item || item.startsWith('#')) continue;
+      if (streamInfo) {
+        const url = onlineUrl(item);
+        const resolution = streamInfo.match(/RESOLUTION=([0-9]+x[0-9]+)/i)?.[1];
+        const name = streamInfo.match(/NAME="([^"]+)"/i)?.[1] || resolution || (streamInfo.match(/BANDWIDTH=([0-9]+)/i) ? `${Math.round(Number(streamInfo.match(/BANDWIDTH=([0-9]+)/i)[1]) / 1000)} kbps` : 'Stream');
+        if (url) variants.push({ id: crypto.randomUUID(), name, url, group: 'HLS qualities', logo: '', favorite: false });
+        streamInfo = '';
+      }
+    }
+    if (variants.length) return variants;
+    const streamUrl = onlineUrl(baseUrl);
+    return streamUrl ? [{ id: crypto.randomUUID(), name: new URL(streamUrl).pathname.split('/').pop()?.replace(/\.m3u8?$/i, '') || 'Live stream', url: streamUrl, group: 'HLS stream', logo: '', favorite: false }] : [];
+  }
   const found = []; let label = '', group = '', logo = '';
-  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    const item = line.trim();
+  for (const item of lines) {
     if (item.startsWith('#EXTINF:')) { label = item.split(',').slice(1).join(',').trim() || item.match(/tvg-name="([^"]+)"/)?.[1] || ''; group = item.match(/group-title="([^"]+)"/)?.[1] || ''; logo = item.match(/tvg-logo="([^"]+)"/)?.[1] || ''; continue; }
     if (item.startsWith('#EXTGRP:')) { group = item.slice(8).trim(); continue; }
     if (!item || item.startsWith('#')) continue;
-    try { const url = new URL(item); if (['http:', 'https:'].includes(url.protocol)) found.push({ id: crypto.randomUUID(), name: label || url.hostname, url: url.href, group, logo: /^https?:\/\//.test(logo) ? logo : '', favorite: false }); } catch { /* Local paths cannot be played as remote streams. */ }
+    const url = onlineUrl(item);
+    if (url) found.push({ id: crypto.randomUUID(), name: label || new URL(url).hostname, url, group, logo: /^https?:\/\//.test(logo) ? logo : '', favorite: false });
     label = ''; group = ''; logo = '';
   }
   return found;
 }
+function playlistFetchUrl(address) {
+  const url = new URL(address);
+  const match = url.hostname === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+)\/(?:blob|raw)\/(.+\.m3u8?)$/i);
+  return match ? new URL(`https://raw.githubusercontent.com/${match[1]}/${match[2]}/${match[3]}`) : url;
+}
 async function fetchPlaylist(address) {
   let url;
-  try { url = new URL(address); } catch { throw new Error('Enter a valid M3U playlist URL.'); }
+  try { url = playlistFetchUrl(address); } catch { throw new Error('Enter a valid M3U or M3U8 playlist URL.'); }
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS playlist URL.');
-  const response = await window.streamBridge.fetch({ url: url.href });
+  const response = await window.streamBridge.fetch({ url: url.href, kind: 'playlist' });
   if (response.status !== 200 || !response.data) throw new Error(response.status === 401 || response.status === 403 ? 'This playlist needs access or is blocking UNiPLAY.' : response.status === 404 ? 'Playlist link not found. Check the URL.' : 'Could not load this playlist. Check the link and try again.');
   if (response.data.length > 2 * 1024 * 1024) throw new Error('This playlist is too large. Use a file under 2 MB.');
   const text = new TextDecoder().decode(response.data);
   if (!/^\uFEFF?#EXTM3U\b/.test(text)) throw new Error('This link did not return an M3U playlist.');
-  const channels = parsePlaylist(text);
+  const channels = parsePlaylist(text, response.url || url.href);
   if (!channels.length) throw new Error('No playable online channels were found in this playlist.');
   return channels;
 }
@@ -372,7 +404,8 @@ for (const name of ['dragleave', 'drop']) $('#playlist-drop').addEventListener(n
 document.addEventListener('dragover', event => event.preventDefault());
 document.addEventListener('drop', event => event.preventDefault());
 let youtubeResults = [];
-function playYoutube(video) { currentYoutube = video; $('#youtube-player-card').hidden = false; $('#youtube-playing-title').textContent = video.title || 'YouTube video'; $('#youtube-player').src = 'https://www.youtube.com/embed/' + encodeURIComponent(video.id) + '?autoplay=1&rel=0&playsinline=1'; setFeedback('#youtube-feedback', ''); }
+async function playYoutube(video) { const info = video.playbackUrl ? video : await window.downyt.analyze(video.url); currentYoutube = info; $('#youtube-player-card').hidden = false; $('#youtube-playing-title').textContent = info.title || 'YouTube video'; const direct = $('#youtube-player'), embed = $('#youtube-embed'); direct.hidden = !info.playbackUrl; embed.hidden = !!info.playbackUrl; direct.src = info.playbackUrl || ''; embed.src = info.playbackUrl ? '' : 'https://www.youtube.com/embed/' + encodeURIComponent(info.id) + '?autoplay=1&rel=0&playsinline=1'; if (info.playbackUrl) direct.play().catch(() => {}); setFeedback('#youtube-feedback', info.playbackUrl ? '' : 'Direct playback was unavailable. Trying the YouTube player.'); }
+$('#youtube-player').addEventListener('error', () => { if (!currentYoutube) return; $('#youtube-player').hidden = true; $('#youtube-embed').hidden = false; $('#youtube-embed').src = 'https://www.youtube.com/embed/' + encodeURIComponent(currentYoutube.id) + '?autoplay=1&rel=0&playsinline=1'; setFeedback('#youtube-feedback', 'Direct playback failed. Trying the YouTube player.'); });
 function renderYoutubeResults() {
   $('#youtube-results').innerHTML = youtubeResults.length ? youtubeResults.map((video, index) => '<button class="youtube-card" data-index="' + index + '"><img src="' + escaped(video.thumbnail) + '" alt=""><span><strong>' + escaped(video.title) + '</strong><small>' + escaped(video.channel) + (video.duration ? ' · ' + duration(video.duration) : '') + '</small></span></button>').join('') : '<div class="empty">No videos found.</div>';
 }
@@ -380,17 +413,17 @@ $('#youtube-search').addEventListener('click', async () => {
   const query = $('#youtube-query').value.trim(); if (!query) { setFeedback('#youtube-feedback', 'Search or paste a video link.'); return; }
   const button = $('#youtube-search'); button.disabled = true; button.textContent = 'Finding…'; setFeedback('#youtube-feedback', '');
   try {
-    if (/^https?:\/\//i.test(query)) { const info = await window.downyt.analyze(query); if (info.playlist) throw new Error('Paste a single video link here.'); youtubeResults = [info]; renderYoutubeResults(); playYoutube(info); }
+    if (/^https?:\/\//i.test(query)) { const info = await window.downyt.analyze(query); if (info.playlist) throw new Error('Paste a single video link here.'); youtubeResults = [info]; renderYoutubeResults(); await playYoutube(info); }
     else { youtubeResults = await window.downyt.searchVideos(query); renderYoutubeResults(); }
   } catch (error) { setFeedback('#youtube-feedback', error.message); }
   finally { button.disabled = false; button.textContent = 'Search'; }
 });
 $('#youtube-query').addEventListener('keydown', event => { if (event.key === 'Enter') $('#youtube-search').click(); });
-$('#youtube-results').addEventListener('click', event => { const card = event.target.closest('[data-index]'); if (!card) return; const video = youtubeResults[Number(card.dataset.index)]; if (video) playYoutube(video); });
-$('#youtube-float').addEventListener('click', async () => { if (!currentYoutube) return; try { const opened = await window.downyt.togglePip({ youtubeUrl: currentYoutube.url, title: currentYoutube.title, channel: currentYoutube.channel }); if (opened) $('#youtube-player').removeAttribute('src'); } catch (error) { setFeedback('#youtube-feedback', error.message); } });
+$('#youtube-results').addEventListener('click', async event => { const card = event.target.closest('[data-index]'); if (!card) return; const video = youtubeResults[Number(card.dataset.index)]; if (video) { setFeedback('#youtube-feedback', 'Preparing video…'); try { await playYoutube(video); } catch (error) { setFeedback('#youtube-feedback', error.message); } } });
+$('#youtube-float').addEventListener('click', async () => { if (!currentYoutube) return; try { const opened = await window.downyt.togglePip({ youtubeUrl: currentYoutube.url, title: currentYoutube.title, channel: currentYoutube.channel, thumbnail: currentYoutube.thumbnail, playbackUrl: currentYoutube.playbackUrl }); if (opened) { $('#youtube-player').pause(); $('#youtube-player').removeAttribute('src'); $('#youtube-embed').removeAttribute('src'); } } catch (error) { setFeedback('#youtube-feedback', error.message); } });
 window.downyt.onPipClosed(source => {
   if (source.type === 'live' && currentStream?.url === source.url) $('#live-video').play().catch(() => {});
-  if (source.type === 'youtube' && currentYoutube?.url === source.url) $('#youtube-player').src = 'https://www.youtube.com/embed/' + encodeURIComponent(currentYoutube.id) + '?autoplay=1&rel=0&playsinline=1';
+  if ((source.type === 'youtube' || source.type === 'direct') && currentYoutube?.url === source.url) playYoutube(currentYoutube).catch(error => setFeedback('#youtube-feedback', error.message));
 });
 let latestUpdate = { status: 'checking', message: 'Checking for updates…' };
 function renderUpdate(info) { latestUpdate = info; $('#updates-message').textContent = info.message; $('#update-badge').hidden = !['available', 'downloading', 'installing'].includes(info.status); $('#updates-action').hidden = info.status !== 'available'; $('#updates-action').textContent = 'Download & install'; $('#updates-refresh').disabled = ['downloading', 'installing'].includes(info.status); }

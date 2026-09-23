@@ -1,6 +1,6 @@
 {
   "name": "uniplay",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A focused desktop download workspace.",
   "main": "main.cjs",
   "author": "Ungyani",

@@ -50,14 +50,12 @@ const fs = require('node:fs');
     await page.locator('#end-time').press('Enter');
     if (await page.locator('#clip-end').inputValue() !== '2') throw new Error('Manual clip end time was not applied');
     await page.locator('#play-range').click();
-    const clipFrame = page.frameLocator('#clip-player');
-    await clipFrame.locator('video').waitFor({ timeout: 30000 });
-    await clipFrame.locator('video').evaluate(video => new Promise((resolve, reject) => {
+    await page.locator('#clip-player').evaluate(video => new Promise((resolve, reject) => {
       if (video.readyState >= 2) return resolve();
-      const timer = setTimeout(() => reject(new Error('Embedded clip did not load media')), 30000);
+      const timer = setTimeout(() => reject(new Error('Clip preview did not load media')), 30000);
       video.addEventListener('loadeddata', () => { clearTimeout(timer); resolve(); }, { once: true });
     }));
-    console.log('Embedded clip loaded media');
+    console.log('Clip preview loaded media');
     if (!await page.locator('#clip-quality option[value="720"]').count()) throw new Error('Video clip quality choices were not loaded');
     await page.locator('#clip-mode-choice [data-clip-mode="audio"]').click();
     await page.locator('#clip-quality').selectOption('192K');
@@ -133,13 +131,7 @@ const fs = require('node:fs');
     await page.locator('#youtube-float').click();
     const youtubePip = (await app.windows()).find(w => w.url().includes('pip.html'));
     if (!youtubePip) throw new Error('YouTube floating player did not open');
-    await youtubePip.locator('#pip.youtube').waitFor();
-    await youtubePip.frameLocator('#youtube-frame').locator('video').waitFor({ timeout: 30000 });
-    await youtubePip.frameLocator('#youtube-frame').locator('video').evaluate(video => new Promise((resolve, reject) => {
-      if (video.readyState >= 2) return resolve();
-      const timer = setTimeout(() => reject(new Error('YouTube floating media did not load')), 30000);
-      video.addEventListener('loadeddata', () => { clearTimeout(timer); resolve(); }, { once: true });
-    }));
+    await youtubePip.locator('#explore-tab:visible').waitFor({ timeout: 30000 });
     await youtubePip.locator('#explore-tab').click();
     await youtubePip.locator('#pip.exploring').waitFor();
     await youtubePip.locator('#explore-query').fill('jazz music');

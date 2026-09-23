@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, Notification, session, Menu, net, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
+const { createServer } = require('node:http');
+const { Readable } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -14,6 +16,44 @@ let manualMoveUntil = 0, driftMoving = false, pipWindowMode = 'video', pipAspect
 let updateInfo = { status: 'checking', message: 'Checking for updates…' };
 const UPDATE_REPO = 'RaoDhruv1203/Uniplay';
 const active = new Map();
+const mediaSources = new Map();
+let mediaServer, mediaPort;
+async function localPlaybackUrl(format) {
+  if (!mediaServer) {
+    mediaServer = createServer(async (request, response) => {
+      const id = /^\/video\/([a-f0-9-]{36})$/.exec(new URL(request.url, 'http://localhost').pathname)?.[1];
+      const source = mediaSources.get(id);
+      if (!source || !['GET', 'HEAD'].includes(request.method)) { response.writeHead(404); response.end(); return; }
+      const headers = { ...source.headers };
+      if (request.headers.range) headers.Range = request.headers.range;
+      const controller = new AbortController();
+      response.once('close', () => controller.abort());
+      const timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        let upstream;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          upstream = await fetch(source.url, { headers, signal: controller.signal });
+          if (![403, 429].includes(upstream.status) || attempt === 1) break;
+          await upstream.body?.cancel();
+          await new Promise(resolve => setTimeout(resolve, 4500));
+        }
+        clearTimeout(timer);
+        const output = {};
+        for (const key of ['content-type', 'content-length', 'content-range', 'accept-ranges']) if (upstream.headers.has(key)) output[key] = upstream.headers.get(key);
+        output['access-control-allow-origin'] = '*'; output['cache-control'] = 'no-store';
+        response.writeHead(upstream.status, output);
+        if (request.method === 'HEAD' || !upstream.body) { response.end(); return; }
+        Readable.fromWeb(upstream.body).on('error', () => response.destroy()).pipe(response);
+      } catch { clearTimeout(timer); if (!response.headersSent) { response.writeHead(502); response.end(); } else response.destroy(); }
+    });
+    await new Promise((resolve, reject) => { mediaServer.once('error', reject); mediaServer.listen(0, '127.0.0.1', resolve); });
+    mediaPort = mediaServer.address().port;
+  }
+  const id = crypto.randomUUID();
+  mediaSources.set(id, { url: format.url, headers: format.http_headers || {} });
+  if (mediaSources.size > 30) mediaSources.delete(mediaSources.keys().next().value);
+  return `http://127.0.0.1:${mediaPort}/video/${id}`;
+}
 const dataPath = () => path.join(app.getPath('userData'), 'data.json');
 const binary = name => path.join(app.isPackaged ? process.resourcesPath : __dirname, 'tools', `${name}.exe`);
 const defaults = () => ({ folder: path.join(app.getPath('downloads'), 'UNiPLAY'), concurrent: 2, thumbnail: false, notifications: true, prefix: '', suffix: '', audioFormat: 'mp3', cookiesFile: '', cookiesBrowser: '' });
@@ -72,22 +112,51 @@ async function firstFrame(job) {
 }
 function run(exe, args, onLine, onStart, cwd = settings.folder) { return new Promise((resolve, reject) => { const child = spawn(exe, args, { windowsHide: true, cwd }); onStart?.(child); let out = '', err = '', pending = ''; child.stdout?.on('data', chunk => { const text = chunk.toString(); out += text; pending += text; const lines = pending.split(/\r?\n|\r/g); pending = lines.pop(); lines.forEach(line => onLine?.(line)); }); child.stderr?.on('data', chunk => { err += chunk.toString(); }); let done = false; child.once('error', error => { if (!done) { done = true; reject(error); } }); child.once('close', code => { if (done) return; done = true; if (pending) onLine?.(pending); code === 0 ? resolve(out) : reject(new Error(err || `Engine stopped with code ${code}`)); }); }); }
 function authArgs() { if (settings.cookiesBrowser) return ['--cookies-from-browser', settings.cookiesBrowser]; if (!settings.cookiesFile) return []; if (!fs.existsSync(settings.cookiesFile)) throw new Error('Your YouTube sign-in file was moved or deleted. Choose it again in Settings.'); return ['--cookies', settings.cookiesFile]; }
+function youtubeProfileArgs(profile) { return profile === 'embedded' ? ['--extractor-args', 'youtube:player_client=web_embedded'] : profile === 'signed' ? authArgs() : []; }
+function youtubeProfiles() { return ['embedded', 'default', ...(settings.cookiesBrowser || settings.cookiesFile ? ['signed'] : [])]; }
 function friendlyYoutubeError(error) { const message = String(error?.message || error); if (/Could not copy .*cookie database|failed to decrypt|cannot decrypt/i.test(message)) return new Error('UNiPLAY could not read that browser’s cookies. Close the browser and retry, or choose a cookies.txt file in Settings.'); if (/Sign in to confirm|HTTP Error 429|Too Many Requests/i.test(message)) return new Error(settings.cookiesBrowser ? 'YouTube is still blocking this request. The selected browser may not be signed in, or this network is rate-limited. Try again later or choose a cookies.txt file.' : settings.cookiesFile ? 'YouTube is still blocking this request. Your sign-in file may have expired, or this network is rate-limited. Refresh the file or try again later.' : 'YouTube is asking you to sign in or wait before retrying. In Settings, choose a browser or YouTube cookies.txt file, then try again.'); return error; }
-async function youtubeRun(args, onLine, onStart, cwd) { try { return await run(binary('yt-dlp'), ['--no-config', ...authArgs(), ...args], onLine, onStart, cwd); } catch (error) { throw friendlyYoutubeError(error); } }
+async function youtubeRun(args, onLine, onStart, cwd) { let lastError; for (const profile of youtubeProfiles()) { try { return await run(binary('yt-dlp'), ['--no-config', ...youtubeProfileArgs(profile), ...args], onLine, onStart, cwd); } catch (error) { lastError = error; } } throw friendlyYoutubeError(lastError); }
 function validUrl(value) { try { const url = new URL(value); return ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'].includes(url.hostname) && ['https:', 'http:'].includes(url.protocol); } catch { return false; } }
 function youtubeId(value) { try { const url = new URL(value); if (!validUrl(value)) return null; const id = url.hostname === 'youtu.be' ? url.pathname.slice(1) : url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : url.searchParams.get('v'); return /^[\w-]{11}$/.test(id || '') ? id : null; } catch { return null; } }
 async function searchVideos(query) { const text = String(query || '').trim().slice(0, 100); if (!text) return []; const list = JSON.parse(await youtubeRun(['--no-warnings', '--flat-playlist', '-J', `ytsearch10:${text}`])); return (list.entries || []).filter(item => /^[\w-]{11}$/.test(item.id || '')).map(item => ({ id: item.id, url: `https://www.youtube.com/watch?v=${item.id}`, title: item.title || 'YouTube video', channel: item.channel || item.uploader || 'YouTube', thumbnail: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, duration: item.duration || 0 })); }
-async function analyze(url) { if (!validUrl(url)) throw new Error('Paste a YouTube video, Short, or playlist link.'); const parsed = new URL(url); if (parsed.pathname === '/playlist' && parsed.searchParams.has('list')) { const list = JSON.parse(await youtubeRun(['--no-warnings', '--flat-playlist', '-J', url])); const entries = (list.entries || []).filter(item => item.id).map(item => ({ url: 'https://www.youtube.com/watch?v=' + item.id, id: item.id, title: item.title || 'YouTube video', channel: item.channel || item.uploader || '', thumbnail: item.thumbnails?.at(-1)?.url || '' })); if (!entries.length) throw new Error('No videos were found in this playlist.'); return { url, id: list.id, title: list.title || 'YouTube playlist', channel: list.channel || list.uploader || 'YouTube', duration: 0, thumbnail: list.thumbnail || entries[0].thumbnail, resolutions: [], playlist: entries }; } const info = JSON.parse(await youtubeRun(['--no-warnings', '--no-playlist', '-J', '--skip-download', url])); return { url, id: info.id, title: info.title || 'Untitled video', channel: info.channel || info.uploader || 'YouTube', duration: info.duration || 0, thumbnail: info.thumbnail || '', resolutions: [...new Set((info.formats || []).filter(f => f.vcodec && f.vcodec !== 'none' && f.height).map(f => f.height))].sort((a, b) => b - a) }; }
+async function analyze(url) {
+  if (!validUrl(url)) throw new Error('Paste a YouTube video, Short, or playlist link.');
+  const parsed = new URL(url);
+  if (parsed.pathname === '/playlist' && parsed.searchParams.has('list')) {
+    const list = JSON.parse(await youtubeRun(['--no-warnings', '--flat-playlist', '-J', url]));
+    const entries = (list.entries || []).filter(item => item.id).map(item => ({ url: 'https://www.youtube.com/watch?v=' + item.id, id: item.id, title: item.title || 'YouTube video', channel: item.channel || item.uploader || '', thumbnail: item.thumbnails?.at(-1)?.url || '' }));
+    if (!entries.length) throw new Error('No videos were found in this playlist.');
+    return { url, id: list.id, title: list.title || 'YouTube playlist', channel: list.channel || list.uploader || 'YouTube', duration: 0, thumbnail: list.thumbnail || entries[0].thumbnail, resolutions: [], playlist: entries };
+  }
+  const info = JSON.parse(await youtubeRun(['--no-warnings', '--no-playlist', '-J', '--skip-download', url]));
+  const playable = (info.formats || []).filter(f => f.url?.startsWith('https://') && f.vcodec && f.vcodec !== 'none' && f.acodec && f.acodec !== 'none' && f.ext === 'mp4').sort((a, b) => (b.height || 0) - (a.height || 0));
+  return { url, id: info.id, title: info.title || 'Untitled video', channel: info.channel || info.uploader || 'YouTube', duration: info.duration || 0, thumbnail: info.thumbnail || '', playbackUrl: playable[0] ? await localPlaybackUrl(playable[0]) : '', resolutions: [...new Set((info.formats || []).filter(f => f.vcodec && f.vcodec !== 'none' && f.height).map(f => f.height))].sort((a, b) => b - a) };
+}
+async function resolveStudioUrl(raw) {
+  const url = new URL(String(raw || '').trim());
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS media link.');
+  if (validUrl(url.href)) {
+    const info = await analyze(url.href);
+    if (!info.playbackUrl) throw new Error('This YouTube video does not offer a playable stream for Live Studio.');
+    return { type: 'video', name: info.title, url: info.playbackUrl, originalUrl: url.href, duration: info.duration };
+  }
+  if (/\.m3u8?$/i.test(url.pathname)) return { type: 'stream', name: url.hostname, url: url.href };
+  if (/\.(mp4|webm|mov|m4v)$/i.test(url.pathname)) return { type: 'video', name: decodeURIComponent(url.pathname.split('/').pop()) || url.hostname, url: url.href };
+  try {
+    const info = JSON.parse(await run(binary('yt-dlp'), ['--no-config', '--no-warnings', '--no-playlist', '-J', '--skip-download', url.href], null, null, app.getPath('temp')));
+    const formats = (info.formats || []).filter(format => format.url?.startsWith('https://') && format.vcodec && format.vcodec !== 'none' && format.acodec && format.acodec !== 'none' && format.ext === 'mp4').sort((a, b) => (b.height || 0) - (a.height || 0));
+    if (formats[0]) return { type: 'video', name: info.title || url.hostname, url: formats[0].url, originalUrl: url.href, duration: info.duration || 0 };
+  } catch {}
+  throw new Error('This page does not expose a playable video. Use a supported video page, direct MP4, or M3U8 stream link.');
+}
 function outputTemplate(job) { const safe = value => String(value || '').replace(/[<>:"/\\|?*]/g, '').slice(0, 48); const clipTag = job.kind.startsWith('clip-') ? ` [clip ${Math.floor(job.start)}-${Math.floor(job.end)}s]` : ''; return path.join(job.folder || settings.folder, `${safe(job.prefix)}%(title).160B${clipTag}${safe(job.suffix)}.%(ext)s`); }
-function argsFor(job) { const args = ['--no-config', ...authArgs(), '--no-playlist', '--newline', '--progress', '--continue', '--ffmpeg-location', path.dirname(binary('ffmpeg')), '--print', 'after_move:DOWNYT_OUTPUT:%(filepath)s', '-o', outputTemplate(job)]; if (job.thumbnail || job.kind === 'thumbnail') args.push('--write-thumbnail', '--convert-thumbnails', 'jpg'); if (job.kind === 'thumbnail') args.push('--skip-download'); else if (job.kind === 'audio' || job.kind === 'clip-audio') args.push('-x', '--audio-format', job.audioFormat || settings.audioFormat, '--audio-quality', job.audioQuality || '0'); else args.push('-f', job.format || 'bv*+ba/b', '--merge-output-format', 'mp4'); if (job.kind.startsWith('clip-')) args.push('--download-sections', `*${job.start}-${job.end}`, '--force-keyframes-at-cuts'); args.push(job.url); return args; }
+function argsFor(job, profile = 'embedded') { const args = ['--no-config', ...youtubeProfileArgs(profile), '--no-playlist', '--newline', '--progress', '--continue', '--ffmpeg-location', path.dirname(binary('ffmpeg')), '--print', 'after_move:DOWNYT_OUTPUT:%(filepath)s', '-o', outputTemplate(job)]; if (job.thumbnail || job.kind === 'thumbnail') args.push('--write-thumbnail', '--convert-thumbnails', 'jpg'); if (job.kind === 'thumbnail') args.push('--skip-download'); else if (job.kind === 'audio' || job.kind === 'clip-audio') args.push('-x', '--audio-format', job.audioFormat || settings.audioFormat, '--audio-quality', job.audioQuality || '0'); else args.push('-f', job.format || 'bv*+ba/b', '--merge-output-format', 'mp4'); if (job.kind.startsWith('clip-')) args.push('--download-sections', `*${job.start}-${job.end}`, '--force-keyframes-at-cuts'); args.push(job.url); return args; }
 function processQueue() {
   while (active.size < settings.concurrent) {
     const job = jobs.find(item => item.status === 'queued'); if (!job) break;
     fs.mkdirSync(job.folder || settings.folder, { recursive: true });
     job.status = 'downloading'; job.stage = 'Connecting to the source…'; job.progress = Math.max(0, job.progress || 0); emit();
-    let downloadArgs;
-    try { downloadArgs = argsFor(job); } catch (error) { job.status = 'error'; job.error = error.message; emit(); continue; }
-    const promise = run(binary('yt-dlp'), downloadArgs, line => {
+    const onLine = line => {
       const match = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
       if (match) { job.progress = Math.max(job.progress || 0, Math.min(99, Number(match[1]))); job.stage = 'Downloading…'; emit(); }
       else if (/Downloading webpage|Downloading player|Extracting URL|Downloading API JSON|Downloading initial data/i.test(line)) { job.stage = 'Checking the video source…'; emit(); }
@@ -97,7 +166,17 @@ function processQueue() {
       else if (/Fixup|post.process|Thumbnails/i.test(line)) { job.stage = 'Finishing the file…'; emit(); }
       if (line.startsWith('DOWNYT_OUTPUT:')) job.filePath = line.slice('DOWNYT_OUTPUT:'.length).trim();
       else { const dest = line.match(/(?:Destination:|Merging formats into|Writing video thumbnail to:)\s*"?(.+?)"?$/); if (dest) job.filePath = dest[1].replace(/^"|"$/g, ''); }
-    }, child => active.set(job.id, child), job.folder || settings.folder);
+    };
+    const promise = (async () => {
+      const profiles = youtubeProfiles();
+      for (const [index, profile] of profiles.entries()) {
+        try { return await run(binary('yt-dlp'), argsFor(job, profile), onLine, child => active.set(job.id, child), job.folder || settings.folder); }
+        catch (error) {
+          if (job.status === 'paused' || job.status === 'cancelled' || index === profiles.length - 1) throw error;
+          job.stage = 'Trying another connection to the video…'; emit();
+        }
+      }
+    })();
     promise.then(() => { if (job.status !== 'paused' && job.status !== 'cancelled') { job.status = 'completed'; job.stage = 'Ready'; job.progress = 100; job.completedAt = new Date().toISOString(); if (settings.notifications && Notification.isSupported()) new Notification({ title: 'UNiPLAY', body: `${job.title} is ready` }).show(); } }).catch(error => { if (!active.get(job.id)?.killed && job.status !== 'paused' && job.status !== 'cancelled') { job.status = 'error'; job.error = friendlyYoutubeError(error).message.slice(-700); } }).finally(() => { active.delete(job.id); emit(); processQueue(); });
   }
 }
@@ -179,7 +258,7 @@ function setPipMode(mode) {
   pipWin.moveTop();
   return true;
 }
-function openPip(input) {
+async function openPip(input) {
   let source, coverJob;
   if (input.jobId) {
     const job = jobs.find(j => j.id === input.jobId && j.status === 'completed');
@@ -189,14 +268,18 @@ function openPip(input) {
   } else if (input.youtubeUrl) {
     const id = youtubeId(input.youtubeUrl);
     if (!id) throw new Error('Paste a valid YouTube video link.');
-    source = { type: 'youtube', id, url: `https://www.youtube.com/watch?v=${id}`, title: String(input.title || 'YouTube video').slice(0, 200), channel: String(input.channel || '').slice(0, 100) };
+    const originalUrl = `https://www.youtube.com/watch?v=${id}`;
+    const reusedUrl = String(input.playbackUrl || '');
+    const reused = reusedUrl.startsWith(`http://127.0.0.1:${mediaPort}/video/`) && mediaSources.has(reusedUrl.split('/').at(-1));
+    const info = reused ? { playbackUrl: reusedUrl, title: input.title, channel: input.channel, thumbnail: input.thumbnail } : await analyze(originalUrl);
+    source = info.playbackUrl ? { type: 'direct', id, url: info.playbackUrl, originalUrl, title: info.title, channel: info.channel, thumbnail: info.thumbnail } : { type: 'youtube', id, url: originalUrl, title: info.title, channel: info.channel, thumbnail: info.thumbnail };
   } else {
     const parsed = new URL(input.streamUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Use a valid stream URL.');
     source = { type: 'live', url: parsed.href, title: String(input.title || 'Live stream'), channels: Array.isArray(input.channels) ? input.channels.filter(s => { try { return ['http:', 'https:'].includes(new URL(s.url).protocol); } catch { return false; } }).slice(0, 200) : [] };
   }
   pipSourceType = source.type;
-  pipSourceUrl = source.url;
+  pipSourceUrl = source.originalUrl || source.url;
   if (!pipWin || pipWin.isDestroyed()) {
     pipAspect = 16 / 9; pipWindowMode = 'video'; videoWindowSize = [480, 270]; previousCursor = null; previousCursorAt = 0; fastApproachUntil = 0; driftAnimation = null;
     pipWin = new BrowserWindow({ width: 480, height: 270, minWidth: 240, minHeight: 150, frame: false, transparent: true, alwaysOnTop: true, resizable: false, movable: true, skipTaskbar: false, hasShadow: false, backgroundColor: '#00000000', title: 'UNiPLAY Floating Player', webPreferences: { preload: path.join(__dirname, 'pip-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -309,7 +392,7 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);
     try {
-      const response = await net.fetch(url.href, { headers, signal: controller.signal });
+      const response = await (input?.kind === 'playlist' ? fetch(url.href, { headers, signal: controller.signal }) : net.fetch(url.href, { headers, signal: controller.signal }));
       if (!response.ok) return { status: response.status, url: response.url, error: `HTTP ${response.status}` };
       if (Number(response.headers.get('content-length')) > 32 * 1024 * 1024) throw new Error('Stream segment is too large.');
       const data = new Uint8Array(await response.arrayBuffer());
@@ -339,17 +422,17 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
   ipcMain.handle('folder:choose', async () => { const choice = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: settings.folder }); if (!choice.canceled && choice.filePaths[0]) { settings.folder = choice.filePaths[0]; emit(); } return settings.folder; });
   ipcMain.handle('folder:open', (_, filePath, folder) => filePath && fs.existsSync(filePath) ? shell.showItemInFolder(filePath) : shell.openPath(folder && fs.existsSync(folder) ? folder : settings.folder));
   ipcMain.handle('pip:open', (_, input) => openPip(input));
-  ipcMain.handle('pip:toggle', (_, input) => {
+  ipcMain.handle('pip:toggle', async (_, input) => {
     const url = input.streamUrl || input.youtubeUrl;
     if (url && pipWin && !pipWin.isDestroyed() && pipSourceUrl === url) { pipWin.close(); return false; }
-    openPip(input); return true;
+    await openPip(input); return true;
   });
   ipcMain.handle('pip:youtube-select', (_, video) => openPip({ youtubeUrl: video.url, title: video.title, channel: video.channel }));
   ipcMain.handle('pip:prepare-audio', (_, url) => { if (!youtubeId(url)) throw new Error('This video cannot be saved as audio.'); if (!win || win.isDestroyed()) createWindow(); win.show(); win.focus(); const contents = win.webContents; if (contents.isLoading()) contents.once('did-finish-load', () => { if (!contents.isDestroyed()) contents.send('download:prepare-audio', url); }); else contents.send('download:prepare-audio', url); return true; });
   ipcMain.handle('pip:close', () => { pipWin?.close(); return true; });
   ipcMain.handle('pip:pin', () => { if (!pipWin || pipWin.isDestroyed()) return false; pipWin.setAlwaysOnTop(!pipWin.isAlwaysOnTop()); return pipWin.isAlwaysOnTop(); });
-  registerStudio(binary, () => win);
+  registerStudio(binary, () => win, resolveStudioUrl);
   createWindow(); processQueue(); setTimeout(checkUpdates, 2500); setInterval(checkUpdates, 24 * 60 * 60 * 1000).unref(); app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
-app.on('before-quit', () => { clearTimeout(saveTimer); for (const child of active.values()) child.kill(); if (settings) save(); });
+app.on('before-quit', () => { clearTimeout(saveTimer); mediaServer?.close(); for (const child of active.values()) child.kill(); if (settings) save(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

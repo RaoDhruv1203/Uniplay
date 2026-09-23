@@ -37,7 +37,8 @@ function load(next) {
   document.querySelector('#title').textContent = next.title || 'UNiPLAY';
   pip.classList.toggle('live', next.type === 'live');
   pip.classList.toggle('youtube', next.type === 'youtube');
-  pip.classList.toggle('file', next.type === 'file');
+  pip.classList.toggle('direct', next.type === 'direct');
+  pip.classList.toggle('file', next.type === 'file' || next.type === 'direct');
   pip.classList.remove('exploring');
   if (next.type === 'youtube' && audioMode) setAudioMode(false);
   document.querySelector('#audio-title').textContent = next.title || 'UNiPLAY';
@@ -50,6 +51,7 @@ function load(next) {
     searchExplore([next.title, next.channel].filter(Boolean).join(' '));
     return;
   }
+  if (next.type === 'direct') { document.querySelector('#explore-query').value = ''; searchExplore([next.title, next.channel].filter(Boolean).join(' ')); }
   if (next.type === 'live' && Array.isArray(next.channels)) channelIndex = next.channels.findIndex(c => c.url === next.url);
   if (next.type === 'live' && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls?.isSupported()) {
     hls = new Hls(window.streamLoaderConfig(window.streamBridge)); hls.loadSource(next.url); hls.attachMedia(video); hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
@@ -63,6 +65,7 @@ document.querySelector('#toggle').onclick = () => video.paused ? video.play() : 
 video.onplay = () => { toggle.src = 'icons/pause.svg'; document.querySelector('#audio-toggle img').src = 'icons/pause.svg'; };
 video.onloadedmetadata = () => { if (video.videoWidth && video.videoHeight) window.downytPip.setAspect(video.videoWidth / video.videoHeight).catch(() => {}); };
 video.onpause = () => { toggle.src = 'icons/play.svg'; document.querySelector('#audio-toggle img').src = 'icons/play.svg'; };
+video.onerror = () => { if (source?.type === 'direct' && source.id) { const failed = source; load({ ...failed, type: 'youtube', url: failed.originalUrl }); playerNotice('Direct playback stopped. Trying the YouTube player.'); } };
 document.querySelector('#rewind').onclick = () => { if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, video.currentTime - 10); };
 document.querySelector('#skip').onclick = () => { if (Number.isFinite(video.duration)) video.currentTime = Math.min(video.duration, video.currentTime + 10); };
 function channel(step) { if (!source?.channels?.length) return; channelIndex = (channelIndex + step + source.channels.length) % source.channels.length; const next = source.channels[channelIndex]; load({ ...source, url: next.url, title: next.name }); }
@@ -72,7 +75,7 @@ video.ontimeupdate = () => { if (!Number.isFinite(video.duration) || !video.dura
 seek.oninput = () => { if (Number.isFinite(video.duration)) video.currentTime = Number(seek.value) / 1000 * video.duration; };
 document.querySelector('#audio-seek').oninput = event => { if (Number.isFinite(video.duration)) video.currentTime = Number(event.target.value) / 1000 * video.duration; };
 async function setAudioMode(enabled, expanded = false) { audioMode = enabled; shelfOpen = expanded && enabled; pip.classList.toggle('audio-mode', enabled); pip.classList.toggle('audio-expanded', shelfOpen); await window.downytPip.setAudioMode(shelfOpen ? 'audio-expanded' : enabled ? 'audio' : 'video'); if (enabled) refreshAudioData(); }
-document.querySelector('#audio-mode').onclick = async () => { if (source?.type === 'file' || source?.type === 'live') { setAudioMode(!audioMode).catch(error => playerNotice(error.message)); return; } if (source?.type === 'youtube') playerNotice('YouTube playback must remain visible. Use a saved file for compact audio mode.'); };
+document.querySelector('#audio-mode').onclick = async () => { if (source?.type === 'file' || source?.type === 'live' || source?.type === 'direct') { setAudioMode(!audioMode).catch(error => playerNotice(error.message)); return; } if (source?.type === 'youtube') playerNotice('This video uses the embedded YouTube player and cannot switch to compact audio.'); };
 document.querySelector('#audio-toggle').onclick = () => video.paused ? video.play() : video.pause();
 document.querySelector('#audio-list').onclick = () => setAudioMode(true, !shelfOpen);
 document.querySelector('#audio-shelf-close').onclick = () => setAudioMode(true, false);
@@ -123,7 +126,7 @@ async function searchExplore(query) {
   document.querySelector('#explore-status').textContent = 'Finding videos…';
   try {
     const results = await window.downytPip.searchVideos(text);
-    if (source?.type !== 'youtube' || sequence !== searchSequence) return;
+    if (!['youtube', 'direct'].includes(source?.type) || sequence !== searchSequence) return;
     exploreResults = results.filter(item => item.id !== source.id);
     renderExplore();
     document.querySelector('#explore-status').textContent = exploreResults.length + ' videos';

@@ -16,6 +16,8 @@ const path = require('node:path');
   const server = createServer((req, res) => {
     console.log('Stream request:', req.url);
     if (req.url === '/live.m3u8') { res.setHeader('content-type', 'application/vnd.apple.mpegurl'); res.end('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nclip.ts\n#EXT-X-ENDLIST\n'); }
+    else if (req.url === '/master.m3u8') { res.setHeader('content-type', 'application/vnd.apple.mpegurl'); res.end('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=700000,RESOLUTION=320x180\nlive.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=640x360\nlive.m3u8?quality=high\n'); }
+    else if (req.url === '/live.m3u8?quality=high') { res.setHeader('content-type', 'application/vnd.apple.mpegurl'); res.end('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nclip.ts\n#EXT-X-ENDLIST\n'); }
     else if (req.url === '/channels.m3u') { if (playlistOffline) { res.statusCode = 503; res.end(); } else { res.setHeader('content-type', 'audio/x-mpegurl'); res.end(`#EXTM3U\n#EXTINF:-1 group-title="News",Local News\n${url}\n` + (playlistRevision > 1 ? `#EXTINF:-1 group-title="Sports",Sports Extra\n${url.replace('live.m3u8', 'sport.m3u8')}\n` : '')); } }
     else if (req.url === '/clip.ts') { res.setHeader('content-type', 'video/mp2t'); res.end(fs.readFileSync(segment)); }
     else { res.statusCode = 404; res.end(); }
@@ -44,12 +46,30 @@ const path = require('node:path');
     await page.locator('#iptv-view').click();
     await page.locator('#streams.grid .iptv-channel-icon').waitFor();
     if (!(await page.locator('#streams.grid .iptv-channel-icon').evaluate(element => element.getBoundingClientRect().width > 200))) throw new Error('Channel artwork did not enlarge in grid view');
+    await page.locator('#iptv-tile-size').fill('400');
+    if (await page.locator('#iptv-tile-size').inputValue() !== '400' || await page.locator('#streams').evaluate(element => getComputedStyle(element).getPropertyValue('--tile-width').trim()) !== '400px') throw new Error('Channel tile size slider did not update the grid');
     await page.locator('#iptv-view').click();
     await page.locator('#streams:not(.grid)').waitFor();
     await page.locator('.iptv-heart').click();
     if (!(await page.locator('#iptv-refresh-playlist').isDisabled())) throw new Error('File playlist unexpectedly offered URL refresh');
     await page.locator('#playlist-url').fill(url.replace('live.m3u8', 'channels.m3u'));
     await page.locator('#playlist-url-add').click();
+    await page.locator('#iptv-source').selectOption({ label: 'channels (1)' });
+    await page.locator('#playlist-url').fill(url);
+    await page.locator('#playlist-url-add').click();
+    await page.locator('#iptv-source').selectOption({ label: 'live (1)' });
+    if (await page.locator('.iptv-channel').count() !== 1) throw new Error('HLS media playlist URL was not imported as a stream');
+    await page.locator('#playlist-url').fill(url.replace('live.m3u8', 'master.m3u8'));
+    await page.locator('#playlist-url-add').click();
+    await page.locator('#iptv-source').selectOption({ label: 'master (2)' });
+    if (await page.locator('.iptv-channel').count() !== 2) throw new Error('HLS master playlist variants were not imported');
+    const githubLink = 'https://github.com/iptv-org/iptv/blob/master/streams/us_firetv.m3u';
+    if (await page.evaluate(link => playlistFetchUrl(link).href, githubLink) !== 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_firetv.m3u') throw new Error('GitHub playlist link was not converted to raw content');
+    await page.locator('#playlist-url').fill(githubLink);
+    await page.locator('#playlist-url-add').click();
+    try { await page.waitForFunction(() => [...document.querySelectorAll('#iptv-source option')].some(option => option.textContent.startsWith('us firetv (')), null, { timeout: 30000 }); }
+    catch (error) { console.log('GitHub import feedback:', await page.locator('#live-feedback').innerText()); throw error; }
+    if (await page.locator('#iptv-source option').filter({ hasText: 'us firetv (' }).count() !== 1) throw new Error('GitHub playlist did not import');
     await page.locator('#iptv-source').selectOption({ label: 'channels (1)' });
     if (await page.locator('#iptv-refresh-playlist').isDisabled()) throw new Error('Link playlist refresh was disabled');
     await page.locator('.iptv-heart').click();
