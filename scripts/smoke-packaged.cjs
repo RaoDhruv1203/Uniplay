@@ -98,7 +98,7 @@ const fs = require('node:fs');
     console.log('Saved clip plays in floating window');
     await page.locator('[data-view="live"]').click();
     await page.locator('#playlist-file').setInputFiles({ name: 'channels.m3u', mimeType: 'audio/x-mpegurl', buffer: Buffer.from('#EXTM3U\n#EXTINF:-1,QA imported channel\nhttps://example.com/qa-import-' + Date.now() + '.m3u8\n') });
-    try { await page.locator('#streams .stream-name').filter({ hasText: 'QA imported channel' }).last().waitFor({ timeout: 5000 }); }
+    try { await page.locator('#streams .iptv-play').filter({ hasText: 'QA imported channel' }).last().waitFor({ timeout: 5000 }); }
     catch (error) { console.log('M3U feedback:', await page.locator('#live-feedback').innerText()); throw error; }
     console.log('M3U channel imported');
     await page.evaluate(() => {
@@ -106,12 +106,13 @@ const fs = require('node:fs');
       transfer.items.add(new File(['#EXTM3U\n#EXTINF:-1,QA dropped channel\nhttps://example.com/qa-drop-' + Date.now() + '.m3u8\n'], 'dropped.m3u', { type: 'audio/x-mpegurl' }));
       document.querySelector('#playlist-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }));
     });
-    await page.locator('#streams .stream-name').filter({ hasText: 'QA dropped channel' }).last().waitFor({ timeout: 5000 });
+    await page.locator('#streams .iptv-play').filter({ hasText: 'QA dropped channel' }).last().waitFor({ timeout: 5000 });
     console.log('M3U drag and drop imported');
     await page.locator('#stream-name').fill('QA stream');
     await page.locator('#stream-url').fill('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8');
     await page.locator('#add-stream').click();
-    await page.locator('#streams [data-action="playstream"]').last().click();
+    await page.locator('#live-video').waitFor();
+    await page.locator('#live-float').click();
     let pip;
     for (let n = 0; n < 30; n++) { pip = (await app.windows()).find(w => w.url().includes('pip.html')); if (pip) break; await page.waitForTimeout(300); }
     if (!pip) throw new Error('Floating player did not open');
@@ -128,6 +129,8 @@ const fs = require('node:fs');
     await page.locator('#youtube-search').click();
     await page.locator('#youtube-results .youtube-card').first().waitFor({ timeout: 30000 });
     await page.locator('#youtube-results .youtube-card').first().click();
+    await page.locator('#youtube-player-card:not([hidden])').waitFor();
+    await page.locator('#youtube-float').click();
     const youtubePip = (await app.windows()).find(w => w.url().includes('pip.html'));
     if (!youtubePip) throw new Error('YouTube floating player did not open');
     await youtubePip.locator('#pip.youtube').waitFor();

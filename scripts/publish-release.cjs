@@ -65,7 +65,7 @@ function request(method, address, body, contentType = 'application/vnd.github+js
       tag_name: tag,
       target_commitish: 'main',
       name: `UNiPLAY ${version}`,
-      body: `UNiPLAY for Windows. Download and run **UNiPLAY.exe**.\n\nThis update fixes the Explore video-switch crash, stops the floating player from gradually growing during movement, adds aspect-ratio-preserving resize and manual drag controls, and makes drift directional with a margin from screen edges. The Audio button is now visible; on YouTube it prepares an audio download, while saved files can switch to the compact audio player.\n\nThe installer is not code-signed, so Windows may display an Unknown publisher warning.\n\nSHA-256 (UNiPLAY.exe): \`${digest}\``,
+      body: `UNiPLAY for Windows. Download and run **UNiPLAY.exe**.\n\nWhat's new: in-app YouTube and IPTV playback, saved M3U playlists with categories and favorites, direct-stream history with M3U export, smaller resizable floating player, refreshed logo and dark-grey interface, Live Studio for local/M3U8 sources with overlays and LAN HLS broadcasting, clearer download progress, and in-app update download/install from the bell.\n\nLive Studio links work on the same network. Internet viewers require router port forwarding or a relay. YouTube embeds must remain visible; compact audio mode works with saved files and live streams.\n\nThe installer is not code-signed, so Windows may display an Unknown publisher warning.\n\nSHA-256 (UNiPLAY.exe): \`${digest}\``,
       draft: true,
       prerelease: false,
     });

@@ -8,7 +8,7 @@ const resizeHandle = document.querySelector('#resize-handle');
 let dragStart;
 dragHandle.addEventListener('pointerdown', event => { if (event.button !== 0) return; dragStart = { screenX: event.screenX, screenY: event.screenY, windowX: window.screenX, windowY: window.screenY }; dragHandle.setPointerCapture(event.pointerId); event.preventDefault(); });
 dragHandle.addEventListener('pointermove', event => { if (!dragStart) return; window.downytPip.moveTo(dragStart.windowX + event.screenX - dragStart.screenX, dragStart.windowY + event.screenY - dragStart.screenY); });
-for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) dragHandle.addEventListener(type, () => { dragStart = null; });
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) dragHandle.addEventListener(type, () => { if (dragStart) window.downytPip.dragEnd(); dragStart = null; });
 let resizeStart;
 resizeHandle.addEventListener('pointerdown', event => { if (event.button !== 0) return; resizeStart = { screenX: event.screenX, screenY: event.screenY, width: window.innerWidth, ratio: window.innerWidth / window.innerHeight }; resizeHandle.setPointerCapture(event.pointerId); event.preventDefault(); });
 resizeHandle.addEventListener('pointermove', event => { if (!resizeStart) return; const dx = event.screenX - resizeStart.screenX, dy = (event.screenY - resizeStart.screenY) * resizeStart.ratio; window.downytPip.resizeTo(resizeStart.width + (Math.abs(dx) >= Math.abs(dy) ? dx : dy)); });
@@ -28,7 +28,7 @@ function load(next) {
   pip.classList.toggle('youtube', next.type === 'youtube');
   pip.classList.toggle('file', next.type === 'file');
   pip.classList.remove('exploring');
-  if (next.type !== 'file' && audioMode) setAudioMode(false);
+  if (next.type === 'youtube' && audioMode) setAudioMode(false);
   document.querySelector('#audio-title').textContent = next.title || 'UNiPLAY';
   document.querySelector('#audio-artist').textContent = next.channel || 'Saved locally';
   document.querySelector('#audio-cover').src = next.thumbnail || 'uniplay.svg';
@@ -41,7 +41,7 @@ function load(next) {
   }
   if (next.type === 'live' && Array.isArray(next.channels)) channelIndex = next.channels.findIndex(c => c.url === next.url);
   if (next.type === 'live' && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls?.isSupported()) {
-    hls = new Hls(); hls.loadSource(next.url); hls.attachMedia(video); hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+    hls = new Hls(window.streamLoaderConfig(window.streamBridge)); hls.loadSource(next.url); hls.attachMedia(video); hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
   } else { video.src = next.url; video.play().catch(() => {}); }
 }
 window.downytPip.onSource(load);
@@ -60,7 +60,7 @@ video.ontimeupdate = () => { if (!Number.isFinite(video.duration) || !video.dura
 seek.oninput = () => { if (Number.isFinite(video.duration)) video.currentTime = Number(seek.value) / 1000 * video.duration; };
 document.querySelector('#audio-seek').oninput = event => { if (Number.isFinite(video.duration)) video.currentTime = Number(event.target.value) / 1000 * video.duration; };
 async function setAudioMode(enabled, expanded = false) { audioMode = enabled; shelfOpen = expanded && enabled; pip.classList.toggle('audio-mode', enabled); pip.classList.toggle('audio-expanded', shelfOpen); await window.downytPip.setAudioMode(shelfOpen ? 'audio-expanded' : enabled ? 'audio' : 'video'); if (enabled) refreshAudioData(); }
-document.querySelector('#audio-mode').onclick = async () => { if (source?.type === 'file') { setAudioMode(!audioMode).catch(error => playerNotice(error.message)); return; } if (source?.type === 'youtube') { try { await window.downytPip.prepareAudio(source.url); playerNotice('Choose a quality and download. Open the saved file to use Audio mode.'); } catch (error) { playerNotice(error.message); } return; } playerNotice('Audio mode is available for saved files.'); };
+document.querySelector('#audio-mode').onclick = async () => { if (source?.type === 'file' || source?.type === 'live') { setAudioMode(!audioMode).catch(error => playerNotice(error.message)); return; } if (source?.type === 'youtube') playerNotice('YouTube playback must remain visible. Use a saved file for compact audio mode.'); };
 document.querySelector('#audio-toggle').onclick = () => video.paused ? video.play() : video.pause();
 document.querySelector('#audio-list').onclick = () => setAudioMode(true, !shelfOpen);
 document.querySelector('#audio-shelf-close').onclick = () => setAudioMode(true, false);

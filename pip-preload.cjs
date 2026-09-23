@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+contextBridge.exposeInMainWorld('streamBridge', { fetch: input => ipcRenderer.invoke('stream:fetch', input) });
 contextBridge.exposeInMainWorld('downytPip', {
   onSource: handler => ipcRenderer.on('pip:source', (_, source) => handler(source)),
   close: () => ipcRenderer.invoke('pip:close'),
@@ -15,6 +16,7 @@ contextBridge.exposeInMainWorld('downytPip', {
   setAudioMode: compact => ipcRenderer.invoke('pip:mode', compact),
   setAspect: ratio => ipcRenderer.invoke('pip:aspect', ratio),
   moveTo: (x, y) => ipcRenderer.send('pip:drag', { x, y }),
+  dragEnd: () => ipcRenderer.send('pip:drag-end'),
   resizeTo: width => ipcRenderer.send('pip:resize', width),
   onPlaylists: handler => ipcRenderer.on('playlists:changed', (_, lists) => handler(lists)),
 });

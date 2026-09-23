@@ -6,8 +6,8 @@ function New-Panel([int]$width, [int]$height, [string]$destination, [bool]$sideb
   $graphic = [System.Drawing.Graphics]::FromImage($bitmap)
   $graphic.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
   $rect = New-Object System.Drawing.Rectangle(0, 0, $width, $height)
-  $top = [System.Drawing.Color]::FromArgb(24, 10, 30)
-  $bottom = [System.Drawing.Color]::FromArgb(62, 16, 70)
+  $top = [System.Drawing.Color]::FromArgb(28, 28, 32)
+  $bottom = [System.Drawing.Color]::FromArgb(48, 42, 50)
   $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $top, $bottom, 45)
   $graphic.FillRectangle($brush, $rect)
   $glowBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(76, 239, 42, 175))
