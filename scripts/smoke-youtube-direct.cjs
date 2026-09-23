@@ -39,6 +39,9 @@ const path = require('node:path');
     await pip.locator('#explore-query').press('Enter');
     try { await pip.locator('#explore-results .explore-item').first().waitFor({ timeout: 30000 }); }
     catch (error) { console.log('Explore feedback:', await pip.locator('#explore-status').innerText()); throw error; }
+    await pip.evaluate(() => document.querySelector('#video').onerror());
+    await pip.locator('#pip.youtube.exploring').waitFor();
+    if (await pip.locator('#explore-query').inputValue() !== 'jazz music' || !(await pip.locator('#explore-results .explore-item').count())) throw new Error('YouTube fallback erased the active Explore search');
     console.log('Anonymous YouTube analysis, in-app playback, floating audio and Explore search passed');
   } finally { await app.close(); fs.rmSync(temp, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

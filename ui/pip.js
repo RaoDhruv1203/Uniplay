@@ -39,7 +39,7 @@ function load(next) {
   pip.classList.toggle('youtube', next.type === 'youtube');
   pip.classList.toggle('direct', next.type === 'direct');
   pip.classList.toggle('file', next.type === 'file' || next.type === 'direct');
-  pip.classList.remove('exploring');
+  if (!next.preserveExplore) pip.classList.remove('exploring');
   if (next.type === 'youtube' && audioMode) setAudioMode(false);
   document.querySelector('#audio-title').textContent = next.title || 'UNiPLAY';
   document.querySelector('#audio-artist').textContent = next.channel || 'Saved locally';
@@ -47,8 +47,7 @@ function load(next) {
   refreshAudioData();
   if (next.type === 'youtube') {
     youtubeFrame.src = `https://www.youtube.com/embed/${encodeURIComponent(next.id)}?autoplay=1&rel=0&playsinline=1`;
-    document.querySelector('#explore-query').value = '';
-    searchExplore([next.title, next.channel].filter(Boolean).join(' '));
+    if (!next.preserveExplore) { document.querySelector('#explore-query').value = ''; searchExplore([next.title, next.channel].filter(Boolean).join(' ')); }
     return;
   }
   if (next.type === 'direct') { document.querySelector('#explore-query').value = ''; searchExplore([next.title, next.channel].filter(Boolean).join(' ')); }
@@ -65,7 +64,7 @@ document.querySelector('#toggle').onclick = () => video.paused ? video.play() : 
 video.onplay = () => { toggle.src = 'icons/pause.svg'; document.querySelector('#audio-toggle img').src = 'icons/pause.svg'; };
 video.onloadedmetadata = () => { if (video.videoWidth && video.videoHeight) window.downytPip.setAspect(video.videoWidth / video.videoHeight).catch(() => {}); };
 video.onpause = () => { toggle.src = 'icons/play.svg'; document.querySelector('#audio-toggle img').src = 'icons/play.svg'; };
-video.onerror = () => { if (source?.type === 'direct' && source.id) { const failed = source; load({ ...failed, type: 'youtube', url: failed.originalUrl }); playerNotice('Direct playback stopped. Trying the YouTube player.'); } };
+video.onerror = () => { if (source?.type === 'direct' && source.id) { const failed = source; load({ ...failed, type: 'youtube', url: failed.originalUrl, preserveExplore: true }); playerNotice('Direct playback stopped. Trying the YouTube player.'); } };
 document.querySelector('#rewind').onclick = () => { if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, video.currentTime - 10); };
 document.querySelector('#skip').onclick = () => { if (Number.isFinite(video.duration)) video.currentTime = Math.min(video.duration, video.currentTime + 10); };
 function channel(step) { if (!source?.channels?.length) return; channelIndex = (channelIndex + step + source.channels.length) % source.channels.length; const next = source.channels[channelIndex]; load({ ...source, url: next.url, title: next.name }); }

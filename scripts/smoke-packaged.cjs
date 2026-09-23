@@ -136,7 +136,8 @@ const fs = require('node:fs');
     await youtubePip.locator('#pip.exploring').waitFor();
     await youtubePip.locator('#explore-query').fill('jazz music');
     await youtubePip.locator('#explore-query').press('Enter');
-    await youtubePip.locator('#explore-results .explore-item').first().waitFor({ timeout: 30000 });
+    try { await youtubePip.locator('#explore-results .explore-item').first().waitFor({ timeout: 30000 }); }
+    catch (error) { console.log('Explore diagnostic:', await youtubePip.evaluate(() => ({ status: document.querySelector('#explore-status').textContent, source: document.querySelector('#pip').className, query: document.querySelector('#explore-query').value }))); throw error; }
     await youtubePip.locator('#explore-results .explore-item').first().click();
     console.log('YouTube floating search and switch worked');
   } finally { await app.close(); }
