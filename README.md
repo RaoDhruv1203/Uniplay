@@ -21,6 +21,8 @@ Downloads and playlists are stored locally. The app checks this repository's pub
 
 Some online videos restrict embedding or include ads controlled by their provider. UNiPLAY cannot guarantee an ad-free YouTube embed. Only download and play content you are allowed to use.
 
+If YouTube displays a sign-in or bot-check error, select a YouTube-only Netscape `cookies.txt` file in Settings and retry, or wait for the network rate limit to clear. This is optional and never reads browser cookies automatically. The file path remains in your local app settings; the file is not copied into the app or uploaded. Keep it private. [yt-dlp's guide](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies) explains export precautions and account risks.
+
 ## Build from source
 
 Install Node.js and run `npm ci`. Place Windows builds of `yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, and `deno.exe` in `tools/`, with their respective license texts. Then run `npm run dist:win`. The third-party engine binaries and generated installers are intentionally excluded from this source repository; the release installer bundles the engine executables and license texts.

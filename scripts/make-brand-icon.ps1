@@ -15,7 +15,7 @@ foreach ($size in $sizes) {
   $background.AddArc(124, 124, 116, 116, 0, 90)
   $background.AddArc(16, 124, 116, 116, 90, 90)
   $background.CloseFigure()
-  $gradient = [System.Drawing.Drawing2D.LinearGradientBrush]::new([System.Drawing.Rectangle]::new(16, 16, 224, 224), [System.Drawing.Color]::FromArgb(245, 47, 176), [System.Drawing.Color]::FromArgb(34, 32, 39), 45)
+  $gradient = [System.Drawing.Drawing2D.LinearGradientBrush]::new([System.Drawing.Rectangle]::new(16, 16, 224, 224), [System.Drawing.Color]::FromArgb(144, 61, 237), [System.Drawing.Color]::FromArgb(31, 27, 44), 45)
   $graphic.FillPath($gradient, $background)
   $white = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
   $font = [System.Drawing.Font]::new('Segoe UI', 84, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)

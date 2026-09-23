@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('streamBridge', { fetch: input => ipcRenderer.invoke('stream:fetch', input) });
 contextBridge.exposeInMainWorld('downytPip', {
   onSource: handler => ipcRenderer.on('pip:source', (_, source) => handler(source)),
+  onThumbnail: handler => ipcRenderer.on('pip:thumbnail', (_, artwork) => handler(artwork)),
   close: () => ipcRenderer.invoke('pip:close'),
   pin: () => ipcRenderer.invoke('pip:pin'),
   searchVideos: query => ipcRenderer.invoke('video:search', query),

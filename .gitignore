@@ -16,6 +16,7 @@ qa-profile/
 *.p12
 *credentials*
 *token*
+*cookies*.txt
 assets/uniplay-from-ico.png
 assets/downyt.ico
 ui/downyt.svg

@@ -15,7 +15,7 @@ function driftDestination(bounds, cursor, workArea) {
     else y = cursor.y < workArea.y + workArea.height / 2 ? bottom : top;
   }
   const distance = Math.hypot(x - bounds.x, y - bounds.y);
-  return { x, y, duration: Math.max(460, Math.min(820, Math.round(distance * 0.7))) };
+  return { x, y, duration: Math.max(300, Math.min(500, Math.round(distance * 0.48))) };
 }
 
 module.exports = { driftDestination };

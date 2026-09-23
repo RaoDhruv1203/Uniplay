@@ -5,6 +5,17 @@ const seek = document.querySelector('#seek');
 const youtubeFrame = document.querySelector('#youtube-frame');
 const dragHandle = document.querySelector('.drag');
 const resizeHandle = document.querySelector('#resize-handle');
+const cover = document.querySelector('#audio-cover');
+const artwork = document.createElement('div');
+artwork.className = 'audio-art';
+cover.parentElement.insertBefore(artwork, cover);
+artwork.appendChild(cover);
+let overlayTimer;
+function revealOverlay() { pip.classList.remove('controls-idle'); clearTimeout(overlayTimer); overlayTimer = setTimeout(() => pip.classList.add('controls-idle'), 1900); }
+pip.addEventListener('pointermove', revealOverlay);
+pip.addEventListener('pointerenter', revealOverlay);
+pip.addEventListener('pointerleave', () => { clearTimeout(overlayTimer); pip.classList.add('controls-idle'); });
+revealOverlay();
 let dragStart;
 dragHandle.addEventListener('pointerdown', event => { if (event.button !== 0) return; dragStart = { screenX: event.screenX, screenY: event.screenY, windowX: window.screenX, windowY: window.screenY }; dragHandle.setPointerCapture(event.pointerId); event.preventDefault(); });
 dragHandle.addEventListener('pointermove', event => { if (!dragStart) return; window.downytPip.moveTo(dragStart.windowX + event.screenX - dragStart.screenX, dragStart.windowY + event.screenY - dragStart.screenY); });
@@ -45,6 +56,7 @@ function load(next) {
   } else { video.src = next.url; video.play().catch(() => {}); }
 }
 window.downytPip.onSource(load);
+window.downytPip.onThumbnail(({ jobId, url }) => { if (source?.jobId === jobId) { source.thumbnail = url; cover.src = url; } });
 document.querySelector('#close').onclick = () => window.downytPip.close();
 document.querySelector('#pin').onclick = async () => { const pinned = await window.downytPip.pin(); document.querySelector('#pin img').src = pinned ? 'icons/pin.svg' : 'icons/pin-off.svg'; };
 document.querySelector('#toggle').onclick = () => video.paused ? video.play() : video.pause();

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, Notification, session, Menu, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, Notification, session, Menu, net, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,13 +9,13 @@ const { driftDestination } = require('./drift.cjs');
 const { registerStudio } = require('./studio.cjs');
 
 let win, pipWin, pipTimer, previousCursor, lastDrift = 0, settings, jobs = [], playlists = [], saveTimer, driftAnimation;
-let manualMoveUntil = 0, driftMoving = false, pipWindowMode = 'video', pipAspect = 16 / 9, videoWindowSize = [480, 270], pipSourceType = 'file';
+let manualMoveUntil = 0, driftMoving = false, pipWindowMode = 'video', pipAspect = 16 / 9, videoWindowSize = [480, 270], pipSourceType = 'file', pipSourceUrl = '';
 let updateInfo = { status: 'checking', message: 'Checking for updates…' };
 const UPDATE_REPO = 'RaoDhruv1203/Uniplay';
 const active = new Map();
 const dataPath = () => path.join(app.getPath('userData'), 'data.json');
 const binary = name => path.join(app.isPackaged ? process.resourcesPath : __dirname, 'tools', `${name}.exe`);
-const defaults = () => ({ folder: path.join(app.getPath('downloads'), 'UNiPLAY'), concurrent: 2, thumbnail: false, notifications: true, prefix: '', suffix: '', audioFormat: 'mp3' });
+const defaults = () => ({ folder: path.join(app.getPath('downloads'), 'UNiPLAY'), concurrent: 2, thumbnail: false, notifications: true, prefix: '', suffix: '', audioFormat: 'mp3', cookiesFile: '' });
 function load() { try { const data = JSON.parse(fs.readFileSync(dataPath(), 'utf8')); settings = { ...defaults(), ...data.settings }; jobs = (data.jobs || []).map(j => ({ ...j, status: ['downloading', 'queued'].includes(j.status) ? 'queued' : j.status })); playlists = Array.isArray(data.playlists) ? data.playlists : []; } catch { settings = defaults(); jobs = []; playlists = []; } if (!playlists.some(list => list.id === 'liked')) playlists.unshift({ id: 'liked', name: 'Liked', items: [] }); }
 function save() { fs.mkdirSync(path.dirname(dataPath()), { recursive: true }); fs.writeFileSync(dataPath(), JSON.stringify({ settings, jobs, playlists }, null, 2)); }
 function emit() { if (win && !win.isDestroyed()) win.webContents.send('state:changed', { settings, jobs, playlists }); if (pipWin && !pipWin.isDestroyed()) pipWin.webContents.send('playlists:changed', playlists); clearTimeout(saveTimer); saveTimer = setTimeout(save, 350); }
@@ -81,18 +81,23 @@ async function firstFrame(job) {
   return pathToFileURL(target).href;
 }
 function run(exe, args, onLine, onStart, cwd = settings.folder) { return new Promise((resolve, reject) => { const child = spawn(exe, args, { windowsHide: true, cwd }); onStart?.(child); let out = '', err = '', pending = ''; child.stdout?.on('data', chunk => { const text = chunk.toString(); out += text; pending += text; const lines = pending.split(/\r?\n|\r/g); pending = lines.pop(); lines.forEach(line => onLine?.(line)); }); child.stderr?.on('data', chunk => { err += chunk.toString(); }); let done = false; child.once('error', error => { if (!done) { done = true; reject(error); } }); child.once('close', code => { if (done) return; done = true; if (pending) onLine?.(pending); code === 0 ? resolve(out) : reject(new Error(err || `Engine stopped with code ${code}`)); }); }); }
+function authArgs() { if (!settings.cookiesFile) return []; if (!fs.existsSync(settings.cookiesFile)) throw new Error('Your YouTube sign-in file was moved or deleted. Choose it again in Settings.'); return ['--cookies', settings.cookiesFile]; }
+function friendlyYoutubeError(error) { const message = String(error?.message || error); if (/Sign in to confirm|HTTP Error 429|Too Many Requests/i.test(message)) return new Error(settings.cookiesFile ? 'YouTube is still blocking this request. Your sign-in file may have expired, or this network is rate-limited. Refresh the file or try again later.' : 'YouTube is asking you to sign in or wait before retrying. In Settings, choose a YouTube cookies.txt file, then try again. The file stays on your PC.'); return error; }
+async function youtubeRun(args, onLine, onStart, cwd) { try { return await run(binary('yt-dlp'), ['--no-config', ...authArgs(), ...args], onLine, onStart, cwd); } catch (error) { throw friendlyYoutubeError(error); } }
 function validUrl(value) { try { const url = new URL(value); return ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'].includes(url.hostname) && ['https:', 'http:'].includes(url.protocol); } catch { return false; } }
 function youtubeId(value) { try { const url = new URL(value); if (!validUrl(value)) return null; const id = url.hostname === 'youtu.be' ? url.pathname.slice(1) : url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : url.searchParams.get('v'); return /^[\w-]{11}$/.test(id || '') ? id : null; } catch { return null; } }
-async function searchVideos(query) { const text = String(query || '').trim().slice(0, 100); if (!text) return []; const list = JSON.parse(await run(binary('yt-dlp'), ['--no-config', '--no-warnings', '--flat-playlist', '-J', `ytsearch10:${text}`])); return (list.entries || []).filter(item => /^[\w-]{11}$/.test(item.id || '')).map(item => ({ id: item.id, url: `https://www.youtube.com/watch?v=${item.id}`, title: item.title || 'YouTube video', channel: item.channel || item.uploader || 'YouTube', thumbnail: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, duration: item.duration || 0 })); }
-async function analyze(url) { if (!validUrl(url)) throw new Error('Paste a YouTube video, Short, or playlist link.'); const parsed = new URL(url); if (parsed.pathname === '/playlist' && parsed.searchParams.has('list')) { const list = JSON.parse(await run(binary('yt-dlp'), ['--no-config', '--no-warnings', '--flat-playlist', '-J', url])); const entries = (list.entries || []).filter(item => item.id).map(item => ({ url: 'https://www.youtube.com/watch?v=' + item.id, id: item.id, title: item.title || 'YouTube video', channel: item.channel || item.uploader || '', thumbnail: item.thumbnails?.at(-1)?.url || '' })); if (!entries.length) throw new Error('No videos were found in this playlist.'); return { url, id: list.id, title: list.title || 'YouTube playlist', channel: list.channel || list.uploader || 'YouTube', duration: 0, thumbnail: list.thumbnail || entries[0].thumbnail, resolutions: [], playlist: entries }; } const info = JSON.parse(await run(binary('yt-dlp'), ['--no-config', '--no-warnings', '--no-playlist', '-J', '--skip-download', url])); return { url, id: info.id, title: info.title || 'Untitled video', channel: info.channel || info.uploader || 'YouTube', duration: info.duration || 0, thumbnail: info.thumbnail || '', resolutions: [...new Set((info.formats || []).filter(f => f.vcodec && f.vcodec !== 'none' && f.height).map(f => f.height))].sort((a, b) => b - a) }; }
+async function searchVideos(query) { const text = String(query || '').trim().slice(0, 100); if (!text) return []; const list = JSON.parse(await youtubeRun(['--no-warnings', '--flat-playlist', '-J', `ytsearch10:${text}`])); return (list.entries || []).filter(item => /^[\w-]{11}$/.test(item.id || '')).map(item => ({ id: item.id, url: `https://www.youtube.com/watch?v=${item.id}`, title: item.title || 'YouTube video', channel: item.channel || item.uploader || 'YouTube', thumbnail: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, duration: item.duration || 0 })); }
+async function analyze(url) { if (!validUrl(url)) throw new Error('Paste a YouTube video, Short, or playlist link.'); const parsed = new URL(url); if (parsed.pathname === '/playlist' && parsed.searchParams.has('list')) { const list = JSON.parse(await youtubeRun(['--no-warnings', '--flat-playlist', '-J', url])); const entries = (list.entries || []).filter(item => item.id).map(item => ({ url: 'https://www.youtube.com/watch?v=' + item.id, id: item.id, title: item.title || 'YouTube video', channel: item.channel || item.uploader || '', thumbnail: item.thumbnails?.at(-1)?.url || '' })); if (!entries.length) throw new Error('No videos were found in this playlist.'); return { url, id: list.id, title: list.title || 'YouTube playlist', channel: list.channel || list.uploader || 'YouTube', duration: 0, thumbnail: list.thumbnail || entries[0].thumbnail, resolutions: [], playlist: entries }; } const info = JSON.parse(await youtubeRun(['--no-warnings', '--no-playlist', '-J', '--skip-download', url])); return { url, id: info.id, title: info.title || 'Untitled video', channel: info.channel || info.uploader || 'YouTube', duration: info.duration || 0, thumbnail: info.thumbnail || '', resolutions: [...new Set((info.formats || []).filter(f => f.vcodec && f.vcodec !== 'none' && f.height).map(f => f.height))].sort((a, b) => b - a) }; }
 function outputTemplate(job) { const safe = value => String(value || '').replace(/[<>:"/\\|?*]/g, '').slice(0, 48); const clipTag = job.kind.startsWith('clip-') ? ` [clip ${Math.floor(job.start)}-${Math.floor(job.end)}s]` : ''; return path.join(job.folder || settings.folder, `${safe(job.prefix)}%(title).160B${clipTag}${safe(job.suffix)}.%(ext)s`); }
-function argsFor(job) { const args = ['--no-config', '--no-playlist', '--newline', '--progress', '--continue', '--ffmpeg-location', path.dirname(binary('ffmpeg')), '--print', 'after_move:DOWNYT_OUTPUT:%(filepath)s', '-o', outputTemplate(job)]; if (job.thumbnail || job.kind === 'thumbnail') args.push('--write-thumbnail', '--convert-thumbnails', 'jpg'); if (job.kind === 'thumbnail') args.push('--skip-download'); else if (job.kind === 'audio' || job.kind === 'clip-audio') args.push('-x', '--audio-format', job.audioFormat || settings.audioFormat, '--audio-quality', job.audioQuality || '0'); else args.push('-f', job.format || 'bv*+ba/b', '--merge-output-format', 'mp4'); if (job.kind.startsWith('clip-')) args.push('--download-sections', `*${job.start}-${job.end}`, '--force-keyframes-at-cuts'); args.push(job.url); return args; }
+function argsFor(job) { const args = ['--no-config', ...authArgs(), '--no-playlist', '--newline', '--progress', '--continue', '--ffmpeg-location', path.dirname(binary('ffmpeg')), '--print', 'after_move:DOWNYT_OUTPUT:%(filepath)s', '-o', outputTemplate(job)]; if (job.thumbnail || job.kind === 'thumbnail') args.push('--write-thumbnail', '--convert-thumbnails', 'jpg'); if (job.kind === 'thumbnail') args.push('--skip-download'); else if (job.kind === 'audio' || job.kind === 'clip-audio') args.push('-x', '--audio-format', job.audioFormat || settings.audioFormat, '--audio-quality', job.audioQuality || '0'); else args.push('-f', job.format || 'bv*+ba/b', '--merge-output-format', 'mp4'); if (job.kind.startsWith('clip-')) args.push('--download-sections', `*${job.start}-${job.end}`, '--force-keyframes-at-cuts'); args.push(job.url); return args; }
 function processQueue() {
   while (active.size < settings.concurrent) {
     const job = jobs.find(item => item.status === 'queued'); if (!job) break;
     fs.mkdirSync(job.folder || settings.folder, { recursive: true });
     job.status = 'downloading'; job.stage = 'Connecting to the source…'; job.progress = Math.max(0, job.progress || 0); emit();
-    const promise = run(binary('yt-dlp'), argsFor(job), line => {
+    let downloadArgs;
+    try { downloadArgs = argsFor(job); } catch (error) { job.status = 'error'; job.error = error.message; emit(); continue; }
+    const promise = run(binary('yt-dlp'), downloadArgs, line => {
       const match = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
       if (match) { job.progress = Math.max(job.progress || 0, Math.min(99, Number(match[1]))); job.stage = 'Downloading…'; emit(); }
       else if (/Downloading webpage|Downloading player|Extracting URL|Downloading API JSON|Downloading initial data/i.test(line)) { job.stage = 'Checking the video source…'; emit(); }
@@ -103,7 +108,7 @@ function processQueue() {
       if (line.startsWith('DOWNYT_OUTPUT:')) job.filePath = line.slice('DOWNYT_OUTPUT:'.length).trim();
       else { const dest = line.match(/(?:Destination:|Merging formats into|Writing video thumbnail to:)\s*"?(.+?)"?$/); if (dest) job.filePath = dest[1].replace(/^"|"$/g, ''); }
     }, child => active.set(job.id, child), job.folder || settings.folder);
-    promise.then(() => { if (job.status !== 'paused' && job.status !== 'cancelled') { job.status = 'completed'; job.stage = 'Ready'; job.progress = 100; job.completedAt = new Date().toISOString(); if (settings.notifications && Notification.isSupported()) new Notification({ title: 'UNiPLAY', body: `${job.title} is ready` }).show(); } }).catch(error => { if (!active.get(job.id)?.killed && job.status !== 'paused' && job.status !== 'cancelled') { job.status = 'error'; job.error = String(error.message).slice(-700); } }).finally(() => { active.delete(job.id); emit(); processQueue(); });
+    promise.then(() => { if (job.status !== 'paused' && job.status !== 'cancelled') { job.status = 'completed'; job.stage = 'Ready'; job.progress = 100; job.completedAt = new Date().toISOString(); if (settings.notifications && Notification.isSupported()) new Notification({ title: 'UNiPLAY', body: `${job.title} is ready` }).show(); } }).catch(error => { if (!active.get(job.id)?.killed && job.status !== 'paused' && job.status !== 'cancelled') { job.status = 'error'; job.error = friendlyYoutubeError(error).message.slice(-700); } }).finally(() => { active.delete(job.id); emit(); processQueue(); });
   }
 }
 function createWindow() { win = new BrowserWindow({ width: 1120, height: 740, minWidth: 820, minHeight: 560, show: false, backgroundColor: '#100914', title: 'UNiPLAY', icon: nativeImage.createFromPath(path.join(__dirname, 'assets', 'uniplay.ico')), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } }); win.once('ready-to-show', () => win.show()); win.loadFile(path.join(__dirname, 'ui', 'index.html')); win.webContents.setWindowOpenHandler(({ url }) => { if (url === 'https://instagram.com/ungyani' || url === 'https://www.instagram.com/ungyani') shell.openExternal(url); return { action: 'deny' }; }); }
@@ -111,13 +116,13 @@ function startDrift() {
   clearInterval(pipTimer);
   pipTimer = setInterval(() => {
     if (!pipWin || pipWin.isDestroyed()) return;
-    const point = screen.getCursorScreenPoint(), bounds = pipWin.getBounds(), band = 64;
+    const point = screen.getCursorScreenPoint(), bounds = pipWin.getBounds(), band = 110;
     if (Date.now() < manualMoveUntil) { previousCursor = point; return; }
     const inside = point.x >= bounds.x && point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height;
     const close = point.x >= bounds.x - band && point.x <= bounds.x + bounds.width + band && point.y >= bounds.y - band && point.y <= bounds.y + bounds.height + band;
     if (driftAnimation) {
       const elapsed = Math.min(1, (Date.now() - driftAnimation.started) / driftAnimation.duration);
-      const eased = elapsed < 0.5 ? 4 * elapsed ** 3 : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+      const eased = 1 - Math.pow(1 - elapsed, 3);
       const x = Math.round(driftAnimation.fromX + (driftAnimation.toX - driftAnimation.fromX) * eased);
       const y = Math.round(driftAnimation.fromY + (driftAnimation.toY - driftAnimation.fromY) * eased);
       if (x !== bounds.x || y !== bounds.y) { driftMoving = true; try { positionPip(x, y); } finally { driftMoving = false; } }
@@ -125,7 +130,7 @@ function startDrift() {
       previousCursor = point; return;
     }
     if (inside) { previousCursor = point; return; }
-    if (!close || Date.now() - lastDrift < 1600 || !previousCursor) { previousCursor = point; return; }
+    if (!close || !previousCursor) { previousCursor = point; return; }
     const centerX = bounds.x + bounds.width / 2, centerY = bounds.y + bounds.height / 2;
     const nowDistance = Math.hypot(point.x - centerX, point.y - centerY);
     const priorDistance = Math.hypot(previousCursor.x - centerX, previousCursor.y - centerY);
@@ -182,11 +187,12 @@ function setPipMode(mode) {
   return true;
 }
 function openPip(input) {
-  let source;
+  let source, coverJob;
   if (input.jobId) {
     const job = jobs.find(j => j.id === input.jobId && j.status === 'completed');
     if (!job?.filePath || !fs.existsSync(job.filePath)) throw new Error('The saved file could not be found. Use Reveal in folder to check its location.');
     source = { type: 'file', url: pathToFileURL(job.filePath).href, title: job.title, channel: job.channel, thumbnail: job.thumbnailUrl, jobId: job.id };
+    if (['video', 'clip-video'].includes(job.kind)) coverJob = job;
   } else if (input.youtubeUrl) {
     const id = youtubeId(input.youtubeUrl);
     if (!id) throw new Error('Paste a valid YouTube video link.');
@@ -197,18 +203,24 @@ function openPip(input) {
     source = { type: 'live', url: parsed.href, title: String(input.title || 'Live stream'), channels: Array.isArray(input.channels) ? input.channels.filter(s => { try { return ['http:', 'https:'].includes(new URL(s.url).protocol); } catch { return false; } }).slice(0, 200) : [] };
   }
   pipSourceType = source.type;
+  pipSourceUrl = source.url;
   if (!pipWin || pipWin.isDestroyed()) {
     pipAspect = 16 / 9; pipWindowMode = 'video'; videoWindowSize = [480, 270]; previousCursor = null; driftAnimation = null;
-    pipWin = new BrowserWindow({ width: 480, height: 270, minWidth: 240, minHeight: 150, frame: false, transparent: true, alwaysOnTop: true, resizable: false, movable: true, skipTaskbar: false, hasShadow: true, backgroundColor: '#00000000', title: 'UNiPLAY Floating Player', webPreferences: { preload: path.join(__dirname, 'pip-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    pipWin = new BrowserWindow({ width: 480, height: 270, minWidth: 240, minHeight: 150, frame: false, transparent: true, alwaysOnTop: true, resizable: false, movable: true, skipTaskbar: false, hasShadow: false, backgroundColor: '#00000000', title: 'UNiPLAY Floating Player', webPreferences: { preload: path.join(__dirname, 'pip-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     const player = pipWin;
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     player.setPosition(Math.max(area.x + 24, area.x + area.width - 504), Math.max(area.y + 24, area.y + area.height - 294));
     player.on('will-move', () => { if (!driftMoving) { driftAnimation = null; manualMoveUntil = Date.now() + 6000; } });
     player.on('will-resize', () => { manualMoveUntil = Date.now() + 2500; });
-    player.on('closed', () => { clearInterval(pipTimer); if (pipWin === player) pipWin = null; driftAnimation = null; });
+    player.on('closed', () => { clearInterval(pipTimer); if (pipWin === player) pipWin = null; driftAnimation = null; if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('pip:closed', { type: pipSourceType, url: pipSourceUrl }); });
     player.webContents.once('did-finish-load', () => { if (player.isDestroyed() || player.webContents.isDestroyed()) return; player.webContents.send('pip:source', source); player.show(); player.moveTop(); startDrift(); });
     player.loadFile(path.join(__dirname, 'ui', 'pip.html'));
   } else { if (source.type !== 'file') { setPipMode('video'); setPipAspect(16 / 9); } pipWin.webContents.send('pip:source', source); pipWin.show(); pipWin.moveTop(); pipWin.focus(); }
+  if (coverJob) firstFrame(coverJob).then(url => {
+    if (!url || !pipWin || pipWin.isDestroyed() || pipWin.webContents.isDestroyed()) return;
+    if (pipWin.webContents.isLoadingMainFrame()) pipWin.webContents.once('did-finish-load', () => { if (!pipWin?.isDestroyed()) pipWin.webContents.send('pip:thumbnail', { jobId: coverJob.id, url }); });
+    else pipWin.webContents.send('pip:thumbnail', { jobId: coverJob.id, url });
+  }).catch(() => {});
   return true;
 }
 app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (process.env.DOWNYT_TEST_PROFILE) app.setPath('userData', process.env.DOWNYT_TEST_PROFILE); else {
@@ -283,6 +295,17 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
   ipcMain.on('pip:resize', (_, width) => { driftAnimation = null; resizePipTo(Number(width)); });
   ipcMain.handle('video:analyze', (_, url) => analyze(url));
   ipcMain.handle('video:search', (_, query) => searchVideos(query));
+  ipcMain.handle('youtube:cookies:choose', async () => {
+    const choice = await dialog.showOpenDialog(win, { title: 'Choose a YouTube cookies.txt file', properties: ['openFile'], filters: [{ name: 'Netscape cookies file', extensions: ['txt'] }] });
+    if (choice.canceled || !choice.filePaths[0]) return null;
+    const file = choice.filePaths[0], stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size > 10 * 1024 * 1024) throw new Error('Choose a cookies.txt file smaller than 10 MB.');
+    const contents = fs.readFileSync(file, 'utf8');
+    if (!/^# (Netscape HTTP Cookie File|HTTP Cookie File)/.test(contents) || !/youtube\.com/i.test(contents)) throw new Error('This does not look like a YouTube Netscape cookies.txt file.');
+    settings.cookiesFile = file; emit(); return path.basename(file);
+  });
+  ipcMain.handle('youtube:cookies:clear', () => { settings.cookiesFile = ''; emit(); return true; });
+  ipcMain.handle('youtube:cookies:guide', () => shell.openExternal('https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies'));
   ipcMain.handle('stream:fetch', async (_, input) => {
     const url = new URL(String(input?.url || ''));
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only HTTP and HTTPS streams are supported.');
@@ -298,6 +321,12 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
       if (data.byteLength > 32 * 1024 * 1024) throw new Error('Stream segment is too large.');
       return { status: response.status, url: response.url, data };
     } finally { clearTimeout(timer); }
+  });
+  ipcMain.handle('stream:copy-url', (_, streamUrl) => {
+    const url = new URL(String(streamUrl || ''));
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('This channel does not have a copyable web URL.');
+    clipboard.writeText(url.href);
+    return true;
   });
   ipcMain.handle('stream:export-m3u', async (_, content) => {
     if (typeof content !== 'string' || !content.startsWith('#EXTM3U\n') || content.length > 2 * 1024 * 1024) throw new Error('Invalid playlist export.');
@@ -315,6 +344,11 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
   ipcMain.handle('folder:choose', async () => { const choice = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: settings.folder }); if (!choice.canceled && choice.filePaths[0]) { settings.folder = choice.filePaths[0]; emit(); } return settings.folder; });
   ipcMain.handle('folder:open', (_, filePath, folder) => filePath && fs.existsSync(filePath) ? shell.showItemInFolder(filePath) : shell.openPath(folder && fs.existsSync(folder) ? folder : settings.folder));
   ipcMain.handle('pip:open', (_, input) => openPip(input));
+  ipcMain.handle('pip:toggle', (_, input) => {
+    const url = input.streamUrl || input.youtubeUrl;
+    if (url && pipWin && !pipWin.isDestroyed() && pipSourceUrl === url) { pipWin.close(); return false; }
+    openPip(input); return true;
+  });
   ipcMain.handle('pip:youtube-select', (_, video) => openPip({ youtubeUrl: video.url, title: video.title, channel: video.channel }));
   ipcMain.handle('pip:prepare-audio', (_, url) => { if (!youtubeId(url)) throw new Error('This video cannot be saved as audio.'); if (!win || win.isDestroyed()) createWindow(); win.show(); win.focus(); const contents = win.webContents; if (contents.isLoading()) contents.once('did-finish-load', () => { if (!contents.isDestroyed()) contents.send('download:prepare-audio', url); }); else contents.send('download:prepare-audio', url); return true; });
   ipcMain.handle('pip:close', () => { pipWin?.close(); return true; });

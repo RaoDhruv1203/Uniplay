@@ -1,0 +1,17 @@
+html,body{background:transparent!important;overflow:hidden}
+.pip{box-shadow:none;border-radius:18px;isolation:isolate;clip-path:inset(0 round 18px)}
+.pip.audio-mode #audio-shell{border:0;background:radial-gradient(circle at 92% 95%,#7d29d547,transparent 53%),linear-gradient(135deg,#29262e,#16151a 72%)}
+.audio-art{position:relative;flex:none;width:108px;height:108px;border-radius:12px;overflow:hidden;border:1px solid #956dc166;box-shadow:0 8px 26px #0008;background:#35253a}
+.audio-art img{display:block;width:100%;height:100%;object-fit:cover}
+.audio-art::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 90% 98%,#8f2ef39c,transparent 72%),linear-gradient(135deg,transparent 45%,#4a147f57);mix-blend-mode:screen}
+.pip.live .audio-art{background:linear-gradient(145deg,#3a2545,#17151d)}
+.pip.live .audio-art img{object-fit:contain;padding:17px}
+.pip.controls-idle:not(.audio-mode):not(.exploring) .top,.pip.controls-idle:not(.audio-mode):not(.exploring) .controls,.pip.controls-idle:not(.audio-mode):not(.exploring) .timeline,.pip.controls-idle:not(.audio-mode):not(.exploring) .shade{opacity:0!important;pointer-events:none}
+.pip.controls-idle:not(.audio-mode):not(.exploring) .top button,.pip.controls-idle:not(.audio-mode):not(.exploring) .controls button{pointer-events:none}
+.pip.youtube .top{top:50%;left:8px;right:auto;width:auto;transform:translateY(-50%);justify-content:flex-start;opacity:0}
+.pip.youtube:hover:not(.controls-idle) .top{opacity:1}
+.pip.youtube .top strong{display:none}
+.pip.youtube .top .buttons{display:flex;flex-direction:column;gap:5px;padding:5px;border:1px solid #ffffff2e;border-radius:11px;background:#18131cc7;backdrop-filter:blur(14px);box-shadow:0 6px 18px #0008}
+.pip.youtube .top button{width:28px;height:28px;padding:0;border-radius:7px;background:#ffffff16}
+.pip.youtube .top #audio-mode{width:28px}
+.pip.youtube .top #audio-mode span{display:none}

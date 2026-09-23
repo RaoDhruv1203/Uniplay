@@ -10,7 +10,7 @@ function New-Panel([int]$width, [int]$height, [string]$destination, [bool]$sideb
   $bottom = [System.Drawing.Color]::FromArgb(48, 42, 50)
   $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $top, $bottom, 45)
   $graphic.FillRectangle($brush, $rect)
-  $glowBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(76, 239, 42, 175))
+  $glowBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(76, 144, 61, 237))
   $graphic.FillEllipse($glowBrush, ($width - 105), -62, 175, 175)
   $glowBrush.Dispose()
   $icon = [System.Drawing.Image]::FromFile($iconPath)
@@ -22,7 +22,7 @@ function New-Panel([int]$width, [int]$height, [string]$destination, [bool]$sideb
     $muted = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(218, 183, 221))
     $graphic.DrawString('UNiPLAY', $font, $white, 13, 170)
     $graphic.DrawString('VIDEO  /  AUDIO', $small, $muted, 23, 211)
-    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(239, 42, 175), 3)
+    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(144, 61, 237), 3)
     $graphic.DrawLine($pen, 23, 252, 141, 252)
     $pen.Dispose(); $font.Dispose(); $small.Dispose(); $white.Dispose(); $muted.Dispose()
   } else {
