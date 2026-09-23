@@ -1,6 +1,6 @@
 {
   "name": "uniplay",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "A focused desktop download workspace.",
   "main": "main.cjs",
   "author": "Ungyani",
@@ -26,6 +26,7 @@
       "main.cjs",
       "drift.cjs",
       "studio.cjs",
+      "update-download.cjs",
       "preload.cjs",
       "pip-preload.cjs",
       "ui/**/*",

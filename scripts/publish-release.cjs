@@ -65,7 +65,7 @@ function request(method, address, body, contentType = 'application/vnd.github+js
       tag_name: tag,
       target_commitish: 'main',
       name: `UNiPLAY ${version}`,
-      body: `UNiPLAY for Windows. Download and run **UNiPLAY.exe**, or update from the bell in the app.\n\nNew in 1.3.2: add IPTV/M3U playlists by URL, then update each link-based playlist individually with its refresh icon. Updates happen only when you click; matching channel favorites are preserved. The floating player now moves aside quickly for a slower working-cursor approach, while a fast approach briefly holds it still for interaction.\n\nThe installer is not code-signed, so Windows may display an Unknown publisher warning.\n\nSHA-256 (UNiPLAY.exe): \`${digest}\``,
+      body: `UNiPLAY for Windows. Download and run **UNiPLAY.exe**, or update from the bell in the app.\n\nNew in ${version}: opt-in direct browser-cookie use for YouTube; Live Studio queue timing, clip loops, private timeline controls, smoother preloaded source changes, scrolling ticker, and movable LIVE badge. Remote sharing can create a temporary Cloudflare Quick Tunnel link if the service and your network permit it; the app verifies the link before showing it. The in-app updater now resumes interrupted downloads and verifies the complete installer.\n\nQuick Tunnels are a testing service without an uptime guarantee. The installer is not code-signed, so Windows may display an Unknown publisher warning.\n\nSHA-256 (UNiPLAY.exe): \`${digest}\``,
       draft: true,
       prerelease: false,
     });

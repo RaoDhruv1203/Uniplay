@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const { screen } = require('electron');
 const { driftDestination, approachSpeed } = require('./drift.cjs');
 const { registerStudio } = require('./studio.cjs');
+const { downloadVerified } = require('./update-download.cjs');
 
 let win, pipWin, pipTimer, previousCursor, previousCursorAt = 0, fastApproachUntil = 0, settings, jobs = [], playlists = [], saveTimer, driftAnimation;
 let manualMoveUntil = 0, driftMoving = false, pipWindowMode = 'video', pipAspect = 16 / 9, videoWindowSize = [480, 270], pipSourceType = 'file', pipSourceUrl = '';
@@ -15,7 +16,7 @@ const UPDATE_REPO = 'RaoDhruv1203/Uniplay';
 const active = new Map();
 const dataPath = () => path.join(app.getPath('userData'), 'data.json');
 const binary = name => path.join(app.isPackaged ? process.resourcesPath : __dirname, 'tools', `${name}.exe`);
-const defaults = () => ({ folder: path.join(app.getPath('downloads'), 'UNiPLAY'), concurrent: 2, thumbnail: false, notifications: true, prefix: '', suffix: '', audioFormat: 'mp3', cookiesFile: '' });
+const defaults = () => ({ folder: path.join(app.getPath('downloads'), 'UNiPLAY'), concurrent: 2, thumbnail: false, notifications: true, prefix: '', suffix: '', audioFormat: 'mp3', cookiesFile: '', cookiesBrowser: '' });
 function load() { try { const data = JSON.parse(fs.readFileSync(dataPath(), 'utf8')); settings = { ...defaults(), ...data.settings }; jobs = (data.jobs || []).map(j => ({ ...j, status: ['downloading', 'queued'].includes(j.status) ? 'queued' : j.status })); playlists = Array.isArray(data.playlists) ? data.playlists : []; } catch { settings = defaults(); jobs = []; playlists = []; } if (!playlists.some(list => list.id === 'liked')) playlists.unshift({ id: 'liked', name: 'Liked', items: [] }); }
 function save() { fs.mkdirSync(path.dirname(dataPath()), { recursive: true }); fs.writeFileSync(dataPath(), JSON.stringify({ settings, jobs, playlists }, null, 2)); }
 function emit() { if (win && !win.isDestroyed()) win.webContents.send('state:changed', { settings, jobs, playlists }); if (pipWin && !pipWin.isDestroyed()) pipWin.webContents.send('playlists:changed', playlists); clearTimeout(saveTimer); saveTimer = setTimeout(save, 350); }
@@ -43,28 +44,17 @@ async function installUpdate() {
   const targetFolder = path.join(app.getPath('userData'), 'updates'); fs.mkdirSync(targetFolder, { recursive: true });
   const target = path.join(targetFolder, `UNiPLAY-${String(info.version).replace(/[^a-zA-Z0-9.-]/g, '')}.exe`);
   updateInfo = { ...info, status: 'downloading', message: 'Downloading update… 0%' }; if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updateInfo);
-  let stream;
   try {
-    const response = await net.fetch(info.url, { headers: { 'User-Agent': 'UNiPLAY-Updater' } });
-    if (!response.ok || !response.body) throw new Error(`Download failed (${response.status}).`);
-    stream = fs.createWriteStream(target);
-    const hash = crypto.createHash('sha256'); let received = 0, lastPercent = -1;
-    for await (const chunk of response.body) {
-      received += chunk.byteLength; if (received > info.size) throw new Error('The update size did not match.');
-      hash.update(chunk);
-      if (!stream.write(Buffer.from(chunk))) await new Promise(resolve => stream.once('drain', resolve));
-      const percent = Math.floor(received * 100 / info.size);
-      if (percent !== lastPercent) { lastPercent = percent; updateInfo = { ...info, status: 'downloading', message: `Downloading update… ${percent}%` }; if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updateInfo); }
-    }
-    await new Promise((resolve, reject) => stream.end(error => error ? reject(error) : resolve())); stream = null;
-    if (received !== info.size || hash.digest('hex').toLowerCase() !== info.digest.slice(7).toLowerCase()) throw new Error('The downloaded update failed verification.');
+    let lastPercent = -1;
+    await downloadVerified({ fetcher: (url, options) => net.fetch(url, options), url: info.url, target, size: info.size, digest: info.digest, onProgress: (received, total, retry) => {
+      const percent = Math.floor(received * 100 / total);
+      if (percent !== lastPercent || retry) { lastPercent = percent; updateInfo = { ...info, status: 'downloading', message: retry ? `Connection slowed. Resuming from ${percent}%…` : `Downloading update… ${percent}%` }; if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updateInfo); }
+    } });
     updateInfo = { ...info, status: 'installing', message: 'Installing update and restarting…' }; if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updateInfo);
     const child = spawn(target, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true }); child.unref();
     setTimeout(() => app.quit(), 500);
     return true;
   } catch (error) {
-    stream?.destroy();
-    try { if (fs.existsSync(target)) fs.unlinkSync(target); } catch {}
     updateInfo = { ...info, status: 'available', message: `Update failed: ${error.message}` }; if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updateInfo);
     throw error;
   }
@@ -81,8 +71,8 @@ async function firstFrame(job) {
   return pathToFileURL(target).href;
 }
 function run(exe, args, onLine, onStart, cwd = settings.folder) { return new Promise((resolve, reject) => { const child = spawn(exe, args, { windowsHide: true, cwd }); onStart?.(child); let out = '', err = '', pending = ''; child.stdout?.on('data', chunk => { const text = chunk.toString(); out += text; pending += text; const lines = pending.split(/\r?\n|\r/g); pending = lines.pop(); lines.forEach(line => onLine?.(line)); }); child.stderr?.on('data', chunk => { err += chunk.toString(); }); let done = false; child.once('error', error => { if (!done) { done = true; reject(error); } }); child.once('close', code => { if (done) return; done = true; if (pending) onLine?.(pending); code === 0 ? resolve(out) : reject(new Error(err || `Engine stopped with code ${code}`)); }); }); }
-function authArgs() { if (!settings.cookiesFile) return []; if (!fs.existsSync(settings.cookiesFile)) throw new Error('Your YouTube sign-in file was moved or deleted. Choose it again in Settings.'); return ['--cookies', settings.cookiesFile]; }
-function friendlyYoutubeError(error) { const message = String(error?.message || error); if (/Sign in to confirm|HTTP Error 429|Too Many Requests/i.test(message)) return new Error(settings.cookiesFile ? 'YouTube is still blocking this request. Your sign-in file may have expired, or this network is rate-limited. Refresh the file or try again later.' : 'YouTube is asking you to sign in or wait before retrying. In Settings, choose a YouTube cookies.txt file, then try again. The file stays on your PC.'); return error; }
+function authArgs() { if (settings.cookiesBrowser) return ['--cookies-from-browser', settings.cookiesBrowser]; if (!settings.cookiesFile) return []; if (!fs.existsSync(settings.cookiesFile)) throw new Error('Your YouTube sign-in file was moved or deleted. Choose it again in Settings.'); return ['--cookies', settings.cookiesFile]; }
+function friendlyYoutubeError(error) { const message = String(error?.message || error); if (/Could not copy .*cookie database|failed to decrypt|cannot decrypt/i.test(message)) return new Error('UNiPLAY could not read that browser’s cookies. Close the browser and retry, or choose a cookies.txt file in Settings.'); if (/Sign in to confirm|HTTP Error 429|Too Many Requests/i.test(message)) return new Error(settings.cookiesBrowser ? 'YouTube is still blocking this request. The selected browser may not be signed in, or this network is rate-limited. Try again later or choose a cookies.txt file.' : settings.cookiesFile ? 'YouTube is still blocking this request. Your sign-in file may have expired, or this network is rate-limited. Refresh the file or try again later.' : 'YouTube is asking you to sign in or wait before retrying. In Settings, choose a browser or YouTube cookies.txt file, then try again.'); return error; }
 async function youtubeRun(args, onLine, onStart, cwd) { try { return await run(binary('yt-dlp'), ['--no-config', ...authArgs(), ...args], onLine, onStart, cwd); } catch (error) { throw friendlyYoutubeError(error); } }
 function validUrl(value) { try { const url = new URL(value); return ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'].includes(url.hostname) && ['https:', 'http:'].includes(url.protocol); } catch { return false; } }
 function youtubeId(value) { try { const url = new URL(value); if (!validUrl(value)) return null; const id = url.hostname === 'youtu.be' ? url.pathname.slice(1) : url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : url.searchParams.get('v'); return /^[\w-]{11}$/.test(id || '') ? id : null; } catch { return null; } }
@@ -305,9 +295,11 @@ app.whenReady().then(() => { app.setAppUserModelId('com.downyt.desktop'); if (pr
     if (!stat.isFile() || stat.size > 10 * 1024 * 1024) throw new Error('Choose a cookies.txt file smaller than 10 MB.');
     const contents = fs.readFileSync(file, 'utf8');
     if (!/^# (Netscape HTTP Cookie File|HTTP Cookie File)/.test(contents) || !/youtube\.com/i.test(contents)) throw new Error('This does not look like a YouTube Netscape cookies.txt file.');
-    settings.cookiesFile = file; emit(); return path.basename(file);
+    settings.cookiesFile = file; settings.cookiesBrowser = ''; emit(); return path.basename(file);
   });
   ipcMain.handle('youtube:cookies:clear', () => { settings.cookiesFile = ''; emit(); return true; });
+  ipcMain.handle('youtube:browser:connect', (_, browser) => { if (!['chrome', 'edge', 'firefox', 'brave', 'vivaldi', 'opera'].includes(browser)) throw new Error('Choose a supported browser.'); settings.cookiesBrowser = browser; settings.cookiesFile = ''; emit(); return browser; });
+  ipcMain.handle('youtube:browser:clear', () => { settings.cookiesBrowser = ''; emit(); return true; });
   ipcMain.handle('youtube:cookies:guide', () => shell.openExternal('https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies'));
   ipcMain.handle('stream:fetch', async (_, input) => {
     const url = new URL(String(input?.url || ''));
